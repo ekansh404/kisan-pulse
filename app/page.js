@@ -97,37 +97,60 @@ export default function Home() {
         onSpeak={() => speak(greetingText(), lang)}
         right={<button className="hb" onClick={() => setLang(lang === 'hi' ? 'en' : 'hi')} aria-label="Language">{lang === 'hi' ? 'EN' : 'हिं'}</button>}
       />
-      <main className="page">
-        <div>
-          <p className="h1">{L.greet(farmer.name)}</p>
-          <p className="mut">{today} · {farmer.district || farmer.village}{weather ? ` · ${weather.current.temp}°C, ${weather.current.text}` : ''}</p>
-        </div>
+      <main className="page home">
+        <section className="hero rise">
+          <div className="hero-top">
+            <div style={{ minWidth: 0 }}>
+              <p className="eyebrow">{today}</p>
+              <p className="h1">{L.greet(farmer.name)}</p>
+              <p className="mut">{[farmer.village, farmer.district].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(', ')}</p>
+            </div>
+            {weather?.current ? (
+              <div className="wx" aria-label="weather">
+                <b>{weather.current.temp}°</b>
+                <span>{weather.current.text}</span>
+              </div>
+            ) : (
+              <div className="wx ghost" aria-hidden="true"><b>--°</b><span>{weatherError ? (lang === 'en' ? 'No data' : 'उपलब्ध नहीं') : '…'}</span></div>
+            )}
+          </div>
+          {weather?.days?.length > 1 && (
+            <div className="wx-days">
+              {weather.days.slice(1, 4).map((d, i) => (
+                <div key={d.date} className="wx-day">
+                  <span>{lang === 'en' ? ['Tomorrow', 'Day 3', 'Day 4'][i] : ['कल', 'परसों', 'नरसों'][i]}</span>
+                  <b>{d.max}°</b>
+                  <small>{d.rain_mm > 0 ? `${d.rain_mm} mm` : d.text}</small>
+                </div>
+              ))}
+            </div>
+          )}
+          <button className="listen-chip" onClick={() => speak(greetingText(), lang)}>
+            <Icon name="spk" />{lang === 'en' ? 'Listen to today' : 'आज की जानकारी सुनें'}
+          </button>
+        </section>
 
         {alerts.length ? (
           alerts.slice(0, 2).map((a, i) => (
-            <div key={i} className={`alert ${a.level}`} role="status">
-              <Icon name="alert" style={{ width: 28, height: 28 }} />
+            <div key={i} className={`alert ${a.level} rise`} role="status" style={{ animationDelay: `${80 + i * 60}ms` }}>
+              <span className="alert-ic"><Icon name="alert" /></span>
               <div><p className="h3">{a.title}</p><p className="p" style={{ fontSize: 15 }}>{a.advice}</p></div>
             </div>
           ))
         ) : weather ? (
-          <div className="alert ok"><Icon name="check" /><p className="p">{L.noAlerts}</p></div>
-        ) : weatherError ? (
-          <p className="mut weather-soft">{lang === 'en' ? 'Weather is not available right now.' : 'मौसम अभी उपलब्ध नहीं है'}</p>
+          <div className="alert ok rise"><span className="alert-ic"><Icon name="check" /></span><p className="p">{L.noAlerts}</p></div>
         ) : null}
 
-        <button className="spk repeat-btn" onClick={() => speak(greetingText(), lang)}>
-          <Icon name="spk" />{lang === 'en' ? 'Repeat' : 'दोबारा सुनें'}
-        </button>
-
         <section className="mic-zone">
-          <button className="mic-giant" onClick={() => { setFirstQ(null); setOpen(true); }} aria-label={L.tapMic}>
-            <Icon name="mic" />
-          </button>
+          <div className="mic-rings">
+            <button className="mic-giant" onClick={() => { setFirstQ(null); setOpen(true); }} aria-label={L.tapMic}>
+              <Icon name="mic" />
+            </button>
+          </div>
           <p className="mic-label">{L.tapMic}</p>
-          <div className="examples">
+          <div className="examples" role="list">
             {L.examples.map((q) => (
-              <button key={q} className="ex" onClick={() => { setFirstQ(q); setOpen(true); }}>{q}</button>
+              <button key={q} role="listitem" className="ex" onClick={() => { setFirstQ(q); setOpen(true); }}>{q}</button>
             ))}
           </div>
         </section>
