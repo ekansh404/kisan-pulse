@@ -25,9 +25,9 @@ Phone testing needs HTTPS → use the Vercel URL.
 | Area | Owner | Folders |
 |---|---|---|
 | Voice engine, home mic, AI agent, integration, deploy | Ekansh | `lib/voice.js`, `components/*`, `app/page.js`, `app/api/chat`, `lib/agent`, `lib/gemini.js`, `lib/db.js` |
-| Voice onboarding + login | Person 2 | `app/onboarding`, `lib/onboarding.js`, `lib/firebase.js`, `app/api/extract`, `app/api/farmer` |
-| Real data tools | Person 3 | `lib/data/*`, `data/schemes.json`, `app/api/{weather,mandi,soil,schemes,geocode}` |
-| Screens + marketplace | Person 4 | `app/{services,mandi,schemes,profile}`, `lib/market.js`, `app/api/{partners,actions}`, `supabase/seed.sql` |
+| Voice onboarding + login | Aman Pratap | `app/onboarding`, `lib/onboarding.js`, `lib/firebase.js`, `app/api/extract`, `app/api/farmer` |
+| Real data tools | Lavkush | `lib/data/*`, `data/schemes.json`, `app/api/{weather,mandi,soil,schemes,geocode}` |
+| Screens + marketplace | Dev | `app/{services,mandi,schemes,profile}`, `lib/market.js`, `app/api/{partners,actions}`, `supabase/seed.sql` |
 
 ## Real vs simulated
 Real: voice, conversation, weather + alerts, mandi prices, soil, scheme eligibility, OTP login, saving bookings.
