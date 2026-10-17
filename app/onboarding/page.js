@@ -99,15 +99,17 @@ export default function Onboarding() {
 
   // Ask until we get a valid answer (the farmer can always type instead).
   // silenceMs: how long a pause ends the answer. Numbers get longer (people pause between digits).
-  async function ask(q, validate, silenceMs = 1800) {
+  // doneWhen: stop listening the moment the answer is complete (OTP digits, हाँ/ना) instead of waiting for silence
+  async function ask(q, validate, silenceMs = 1800, doneWhen) {
     for (;;) {
-      const r = await askWithRetry(q, { lang: langRef.current, validate, onCaption, onListening: setListening, silenceMs });
+      const r = await askWithRetry(q, { lang: langRef.current, validate, onCaption, onListening: setListening, silenceMs, doneWhen });
       if (r.ok) return r.value;
       if (r.reason === 'denied') throw new Error(langRef.current === 'en' ? 'Microphone permission denied. Allow the mic in Chrome, or type below.' : 'माइक की अनुमति नहीं मिली। Chrome में माइक Allow करें या नीचे लिखें।');
       q = langRef.current === 'en' ? 'You can also type the answer below. ' + q : 'आप नीचे लिखकर भी जवाब दे सकते हैं। ' + q;
     }
   }
   const yn = (text) => { const v = yesNo(text); return v ? { ok: true, value: v } : { ok: false, reask: S[langRef.current].yn }; };
+  const askYN = (q) => ask(q, yn, 1800, (t) => !!yesNo(t));
   const tell = async (text) => { setAiCap(text); setUserCap(''); setListening(false); await speak(text, langRef.current); };
   const fail = async (T, why) => {
     setProblem(why || '');
@@ -123,7 +125,7 @@ export default function Onboarding() {
       const lang = await ask(S.hi.lang, (t) => {
         const l = detectLang(t) || (/[ऀ-ॿ]/.test(t) ? 'hi' : null);
         return l ? { ok: true, value: l } : { ok: false, reask: S.hi.langRe };
-      });
+      }, 1500, (t) => !!detectLang(t));
       langRef.current = lang;
       saveLang(lang);
       const T = S[lang];
@@ -138,7 +140,7 @@ export default function Onboarding() {
           const x = await extract('name', t, lang);
           return x.ok && x.value ? { ok: true, value: x.value } : { ok: false, reask: T.nameRe };
         });
-        if ((await ask(T.nameOk(name), yn)) === 'yes') break;
+        if ((await askYN(T.nameOk(name))) === 'yes') break;
       }
 
       // 3. Mobile + OTP (longer pause allowed while saying digits)
@@ -148,8 +150,8 @@ export default function Onboarding() {
         phone = await ask(T.phone(name), async (t) => {
           const p = parsePhone(t) || (await extract('phone', t, lang).then((x) => (x.ok ? parsePhone(String(x.value)) : null)));
           return p ? { ok: true, value: p } : { ok: false, reask: T.phoneRe };
-        }, 2800);
-        if ((await ask(T.phoneOk(phone), yn)) === 'yes') break;
+        }, 2800, (t) => !!parsePhone(t));
+        if ((await askYN(T.phoneOk(phone))) === 'yes') break;
       }
       let sent = await sendOtp(phone);
       if (!sent.ok) { await tell(T.otpFail); sent = await sendOtp(phone); }
@@ -160,7 +162,7 @@ export default function Onboarding() {
         const code = await ask(i === 0 ? T.otpSent : T.otpWrong, async (t) => {
           const c = parseOtp(t, OTP_LEN) || (await extract('otp', t, lang).then((x) => (x.ok ? parseOtp(String(x.value), OTP_LEN) : null)));
           return c ? { ok: true, value: c } : { ok: false, reask: T.otpRe };
-        }, 2800);
+        }, 2800, (t) => !!parseOtp(t, OTP_LEN));
         const v = await verifyOtp(code);
         if (v.ok) proof = v.proof;
       }
@@ -171,8 +173,7 @@ export default function Onboarding() {
       if (!login.ok) { await fail(T, 'Login: ' + (login.error || 'server error')); return; }
       if (login.exists) {
         setFarmer({ ...login.farmer, lang });
-        await tell(T.welcomeBack(login.farmer.name));
-        return goHome();
+        return goHome('back'); // home greets "दोबारा स्वागत है" with today's weather, no extra wait here
       }
 
       // ---------- New farmer: registration ----------
@@ -200,8 +201,9 @@ export default function Onboarding() {
           if (!g) return { ok: false, reask: T.placeRe };
           return { ok: true, value: { village: village || g.name, district: g.district || g.name, state: g.state || '', lat: g.lat, lon: g.lon } };
         });
-        if ((await ask(T.placeOk(place.district, place.state || 'India'), yn)) === 'yes') break;
+        if ((await askYN(T.placeOk(place.district, place.state || 'India'))) === 'yes') break;
       }
+      prefetchWeather(place.lat, place.lon, lang); // ready before home opens
 
       // 5. Land
       setStep(4);
@@ -215,7 +217,7 @@ export default function Onboarding() {
         }, 2200);
         land.acres = toAcres(land.value, land.unit);
         const unitWord = lang === 'en' ? land.unit : { bigha: 'बीघा', acre: 'एकड़', hectare: 'हेक्टेयर', biswa: 'बिस्वा' }[land.unit] || land.unit;
-        if ((await ask(T.landOk(land.value, unitWord, land.acres), yn)) === 'yes') break;
+        if ((await askYN(T.landOk(land.value, unitWord, land.acres))) === 'yes') break;
       }
 
       // 6. Crops
@@ -230,7 +232,7 @@ export default function Onboarding() {
       // 7. Farmer ID (SIMULATED — real AgriStack verification needs a state MoU)
       setStep(6);
       let farmer_id_sim;
-      if ((await ask(T.fid, yn)) === 'yes') {
+      if ((await askYN(T.fid)) === 'yes') {
         farmer_id_sim = await ask(T.fidNum, async (t) => {
           const id = t.replace(/[^a-z0-9]/gi, '').toUpperCase();
           return id.length >= 4 ? { ok: true, value: id } : { ok: false };
@@ -243,7 +245,7 @@ export default function Onboarding() {
 
       // 8. Consent
       setStep(7);
-      if ((await ask(T.consent, yn)) !== 'yes') { await tell(T.noConsent); setStarted(false); return; }
+      if ((await askYN(T.consent)) !== 'yes') { await tell(T.noConsent); setStarted(false); return; }
 
       // 9. Save -> home
       const reg = await post({
@@ -252,8 +254,7 @@ export default function Onboarding() {
       });
       if (!reg.ok || !reg.farmer) { await fail(T, 'Register: ' + (reg.error || 'server error')); return; }
       setFarmer({ ...reg.farmer, lang });
-      await tell(T.saved(name));
-      goHome();
+      goHome('new'); // home says "बधाई हो… पंजीकरण सफल" + weather + what to ask, straight away
     } catch (e) {
       console.error(e);
       setProblem(String(e?.message || e));
@@ -262,8 +263,9 @@ export default function Onboarding() {
   }
 
   // Go to home. If the router doesn't move (old cached page), force a full load.
-  function goHome() {
+  function goHome(intro) {
     cancelListening(); stopSpeaking();
+    try { if (intro) sessionStorage.setItem('kp_intro', intro); } catch {}
     router.replace('/');
     setTimeout(() => { if (location.pathname.startsWith('/onboarding')) location.href = '/'; }, 1500);
   }
@@ -288,13 +290,11 @@ export default function Onboarding() {
     return (
       <main className="vo" style={{ position: 'fixed' }}>
         <div className="vo-mid" style={{ gap: 22 }}>
-          <span className="logo" style={{ width: 96, height: 96, borderRadius: 28, background: 'var(--tur)', color: 'var(--ink)', display: 'grid', placeItems: 'center' }}>
-            <Icon name="leaf" style={{ width: 54, height: 54 }} />
-          </span>
-          <p className="h1" style={{ color: '#fff', fontSize: 36 }}>{T.title}</p>
-          <p className="p" style={{ color: '#CFE6D3', textAlign: 'center' }}>बोलकर पंजीकरण करें · Register by voice</p>
+          <img className="ob-logo" src="/logo.png" alt="Kisan Pulse" />
+          <p className="h1" style={{ color: 'var(--deep)', fontSize: 36 }}>{T.title}</p>
+          <p className="p" style={{ color: 'var(--mut)', textAlign: 'center' }}>बोलकर पंजीकरण करें · Register by voice</p>
           <button className="orb" onClick={run} aria-label={T.start}><Icon name="mic" /></button>
-          <p className="h2" style={{ color: '#F4E3B0' }}>{T.start} · Start</p>
+          <p className="h2" style={{ color: 'var(--earth)' }}>{T.start} · Start</p>
         </div>
         <div id="recaptcha" />
       </main>
@@ -305,8 +305,9 @@ export default function Onboarding() {
     <main className="vo" style={{ position: 'fixed' }}>
       <div className="vo-top">
         <div className="row" style={{ gap: 6 }} aria-label={`Step ${step + 1} of ${STEPS.length}`}>
+          <img src="/logo.png" alt="" style={{ width: 30, height: 36, objectFit: 'contain', marginRight: 4 }} />
           {STEPS.map((s, i) => (
-            <span key={s} style={{ width: 22, height: 6, borderRadius: 3, background: i <= step ? 'var(--tur)' : 'rgba(255,255,255,.25)' }} />
+            <span key={s} style={{ width: 22, height: 6, borderRadius: 3, background: i <= step ? 'var(--leaf)' : 'var(--line)' }} />
           ))}
         </div>
         <button className="vo-close" onClick={() => { cancelListening(); stopSpeaking(); location.reload(); }} aria-label="Restart"><Icon name="x" /></button>
@@ -344,6 +345,12 @@ async function post(body) {
   } catch (e) {
     return { ok: false, error: 'network' };
   }
+}
+function prefetchWeather(lat, lon, lang) {
+  fetch(`/api/weather?lat=${lat}&lon=${lon}&lang=${lang}`)
+    .then((r) => r.json())
+    .then((w) => { if (!w.error) sessionStorage.setItem('kp_weather', JSON.stringify({ w, lang, at: Date.now() })); })
+    .catch(() => {});
 }
 async function geo(q) {
   try {
