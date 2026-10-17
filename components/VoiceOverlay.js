@@ -232,7 +232,10 @@ export default function VoiceOverlay({ open, onClose, farmer, lang = 'hi', first
   return (
     <div className="vo" role="dialog" aria-modal="true" aria-label="Voice assistant">
       <div className="vo-top">
-        <span className="vo-status" aria-live="polite">{status}</span>
+        <div className="vo-brand">
+          <img src="/logo.png" alt="Kisan Pulse" />
+          <span className="vo-status" aria-live="polite">{status}</span>
+        </div>
         <button className="vo-close" onClick={close} aria-label={L.close}><Icon name="x" /></button>
       </div>
 
