@@ -33,7 +33,7 @@ function slim(kind, d) {
   if (!d || d.error) return d;
   if (kind === 'weather') return { place: d.place, now: d.current, next3days: d.days?.slice(0, 3).map(({ date, max, min, rain_mm, rain_prob, text }) => ({ date, max, min, rain_mm, rain_prob, text })), alerts: d.alerts?.map((a) => a.title + ': ' + a.advice) };
   if (kind === 'mandi') return d.found ? { crop: d.commodity, date: d.date, unit: '₹/quintal', average: d.average_modal, best: d.best, others: d.markets?.slice(1, 4).map((x) => ({ market: x.market, modal: x.modal })), cached: !!d.cached } : { found: false, note: d.note || d.error };
-  if (kind === 'schemes') return d.schemes?.filter((s) => s.status !== 'not_eligible').map((s) => ({ name: s.name, status: s.status, benefit: s.benefit, how: s.how }));
+  if (kind === 'schemes') return d.schemes?.filter((s) => s.status !== 'not_eligible').map((s) => ({ name: s.name, status: s.status, benefit: s.benefit, needs_check: s.why, documents: s.documents, how_to_apply: s.how, official_site: s.source }));
   return d;
 }
 
@@ -68,9 +68,15 @@ UNDERSTANDING THE FARMER:
 
 HOW TO SPEAK (read aloud by a voice):
 - ${lang === 'en' ? 'Simple Indian English.' : 'Everyday spoken Hindi in Devanagari, the way people talk in UP villages. No heavy Sanskrit words, no English jargon.'}
-- Start with the direct answer. 2 or 3 short sentences, under 50 words. No lists, no markdown, no emojis, no brackets.
-- Numbers the way people say them: "चौबीस सौ पचास रुपये क्विंटल" or "2450 रुपये क्विंटल", "24 मिलीमीटर".
-- Address the farmer as "${name}" at most once. End with one concrete thing to do (what, when, how much) when it helps.
+- Talk like a person explaining to a neighbour, as a short story with a clear flow: what is happening -> what it means for THIS farmer -> what to do. 3 to 5 short sentences, about 60-90 words. No lists, no markdown, no emojis, no brackets.
+- Numbers the way people say them: "2450 रुपये क्विंटल", "24 मिलीमीटर बारिश". Address the farmer as "${name}" at most once.
+- Finish with ONE short follow-up question that helps them take the next step (skip it only when you are asking हाँ/ना to confirm a booking).
+
+HOW TO EXPLAIN EACH TOPIC:
+- Mandi price: today's best price and which mandi, how much other nearby mandis pay (the range), what that means (good day to sell or wait, which mandi is worth the trip), then ask e.g. whether to find a buyer or check another crop.
+- Weather: what is coming today/tomorrow, the real risk for their crop at this stage, exactly what to do or avoid (spraying, irrigation, covering harvested crop), then ask if they want advice for their crop.
+- Government schemes: name the scheme and its benefit in money terms, say clearly whether they look eligible (and what still needs checking), which documents they need, and the first step to apply (where to go / which website). If several schemes, give the top 2 briefly and ask which one to explain fully. When they pick one, walk them through documents and the application step by step.
+- Soil / fertiliser / crop problems: what the data shows, what it means for their crop, what to apply and when; exact dose = "पैकेट पर लिखी मात्रा" or the nearest KVK.
 
 DATA:
 - LIVE DATA may be attached under the farmer's message: real and fresh, use it directly; don't call the same tool again.
@@ -87,6 +93,33 @@ DECIDING:
 ACTIONS (tractor, fertiliser/seed order, labour, selling crop): call propose_action (it does not book). Then say who, what and price in one sentence and end with "${lang === 'en' ? 'Shall I confirm? Yes or no?' : 'क्या मैं पक्का कर दूँ? हाँ या ना?'}". Never say it is booked yourself.
 
 HONESTY: Farmer ID / land verification, insurance claims, loans and payments are demo-only in this prototype.`;
+}
+
+// Plain spoken summary of live data, used only if the AI can't answer right now
+function narrate(d = {}, f = {}, lang = 'hi') {
+  const hi = lang !== 'en';
+  const out = [];
+  const w = d.weather;
+  if (w?.now) {
+    out.push(hi ? `${w.place || f.district || ''} में अभी ${w.now.temp} डिग्री है, ${w.now.text}।` : `In ${w.place || f.district || ''} it is ${w.now.temp} degrees, ${w.now.text}.`);
+    const t = w.next3days?.[1];
+    if (t) out.push(hi ? `कल ${t.max} डिग्री तक रहेगा और ${t.rain_mm} मिलीमीटर बारिश का अनुमान है।` : `Tomorrow up to ${t.max} degrees with ${t.rain_mm} mm rain expected.`);
+    if (w.alerts?.length) out.push(w.alerts[0]);
+  }
+  const m = d.mandi;
+  if (m?.best) {
+    out.push(hi ? `${m.crop} का आज सबसे अच्छा भाव ${m.best.market} मंडी में ${m.best.modal} रुपये क्विंटल है, और आसपास की मंडियों का औसत ${m.average} रुपये है।` : `${m.crop}: best price today ${m.best.modal} rupees per quintal at ${m.best.market}; nearby average ${m.average}.`);
+  } else if (m && m.found === false) {
+    out.push(hi ? 'आज आपके इलाके की मंडी से भाव दर्ज नहीं हुआ है।' : 'No mandi price has been reported in your area today.');
+  }
+  const sc = d.schemes;
+  if (Array.isArray(sc) && sc.length) {
+    const top = sc.filter((x) => x.status === 'eligible').slice(0, 2);
+    if (top.length) out.push(hi ? `आप ${top.map((x) => x.name).join(' और ')} के लिए पात्र लगते हैं। ${top[0].benefit}। ${top[0].how_to_apply}` : `You look eligible for ${top.map((x) => x.name).join(' and ')}. ${top[0].benefit}. ${top[0].how_to_apply}`);
+  }
+  if (!out.length) return '';
+  out.push(hi ? 'और कुछ जानना है तो पूछिए।' : 'Ask me if you want to know more.');
+  return out.join(' ');
 }
 
 const msgFor = (lang) => ({
@@ -125,7 +158,7 @@ export async function POST(req) {
   let reply = '';
   try {
     for (let round = 0; round < 3; round++) {
-      const out = await gemini({ system: systemPrompt(farmer, lang), contents, tools: DECLARATIONS, maxTokens: 400, timeoutMs: 14000, think: round === 0 });
+      const out = await gemini({ system: systemPrompt(farmer, lang), contents, tools: DECLARATIONS, maxTokens: 500, timeoutMs: 9000, think: round === 0 });
       if (!out.calls.length) { reply = out.text; break; }
       contents.push({ role: 'model', parts: out.parts });
       const results = await Promise.all(out.calls.map((c) => runTool(c.name, c.args || {}, farmer, lang)));
@@ -139,10 +172,11 @@ export async function POST(req) {
     }
   } catch (e) {
     console.error('chat error', e);
-    reply = e?.busy || e?.name === 'AbortError' ? M.busy : M.net;
+    // AI unavailable: still tell the farmer the real data we already fetched, instead of "server busy"
+    reply = narrate(pre.data, farmer, lang) || (e?.busy ? M.busy : M.net);
   }
 
-  reply = stripMarkdown(reply) || M.none;
+  reply = stripMarkdown(reply) || narrate(pre.data, farmer, lang) || M.none;
   if (pending && !/हाँ या ना|yes or no/i.test(reply)) reply += lang === 'en' ? ' Shall I confirm? Yes or no?' : ' क्या मैं पक्का कर दूँ? हाँ या ना?';
 
   if (s && farmerId) {
