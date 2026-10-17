@@ -78,3 +78,10 @@ alter table messages enable row level security;
 
 create index if not exists partners_type_district on partners(type, district);
 create index if not exists requests_farmer on requests(farmer_id, created_at desc);
+
+-- Server key access (needed on newer Supabase projects; see supabase/grants.sql)
+grant usage on schema public to service_role;
+grant all privileges on all tables in schema public to service_role;
+grant all privileges on all sequences in schema public to service_role;
+alter default privileges in schema public grant all on tables to service_role;
+alter default privileges in schema public grant all on sequences to service_role;

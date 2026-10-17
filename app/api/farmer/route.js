@@ -27,7 +27,8 @@ export async function POST(req) {
 
   if (body.action === 'login') {
     if (!(await phoneVerified(phone, body.proof))) return Response.json({ ok: false, error: 'otp_invalid' }, { status: 401 });
-    const { data } = await s.from('farmers').select('*').eq('phone', '+91' + phone).maybeSingle();
+    const { data, error } = await s.from('farmers').select('*').eq('phone', '+91' + phone).maybeSingle();
+    if (error) return Response.json({ ok: false, error: error.message }, { status: 500 });
     if (data) await s.from('farmers').update({ last_seen_at: new Date().toISOString() }).eq('id', data.id);
     return Response.json({ ok: true, exists: !!data, farmer: data || null });
   }
