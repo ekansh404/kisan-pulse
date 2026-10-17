@@ -1,16 +1,33 @@
 'use client';
-// Full-screen voice conversation. Opens when the giant mic is tapped.
-// Loop: listen -> /api/chat -> speak -> listen again (hands-free). Big captions at the bottom.
+// Full-screen two-way voice conversation (opens from the giant mic).
+// - The mic stays open while the assistant talks: start speaking and it stops (barge-in).
+// - A pause of ~1.8 s (not 0.5 s) ends your turn, so short breaks don't cut you off.
+// - Side buttons: mute/unmute the mic, mute/unmute the assistant's voice.
+// - Tap the orb: while it talks = stop it and talk; while listening = "I'm done"; when idle = talk.
 import { useEffect, useRef, useState } from 'react';
 import Icon from './Icon';
-import { listen, speak, stopListening, stopSpeaking, submitTyped, yesNo, sttSupported } from '@/lib/voice';
+import {
+  listen, speak, speakAndListen, stopListening, cancelListening, isListening,
+  stopSpeaking, submitTyped, yesNo, sttSupported, bargeInEnabled, setBargeIn,
+} from '@/lib/voice';
 import { t } from '@/lib/i18n';
 
-// Shown under the orb once the mic has gone idle after hearing silence.
-const HINT = { hi: 'माइक दबाकर फिर बोलिए', en: 'Tap the mic to speak again' };
+const TXT = {
+  hi: {
+    hint: 'माइक दबाकर फिर बोलिए', muted: 'माइक बंद है', sorry: 'माफ़ कीजिए, मैं आपको सुन नहीं पाई। कृपया दोबारा बोलिए।',
+    speakingOpen: 'बोल रही हूँ… आप बीच में बोल सकते हैं', micOn: 'माइक चालू', micOff: 'माइक बंद', voiceOn: 'आवाज़ चालू', voiceOff: 'आवाज़ बंद',
+    barge: 'बीच में टोकना', on: 'चालू', off: 'बंद', you: 'आप', save: 'सेव नहीं हो पाया, दोबारा कोशिश करें।',
+  },
+  en: {
+    hint: 'Tap the mic to speak again', muted: 'Mic is muted', sorry: "Sorry, I couldn't hear you. Please speak again.",
+    speakingOpen: 'Speaking… you can talk over me', micOn: 'Mic on', micOff: 'Mic off', voiceOn: 'Voice on', voiceOff: 'Voice off',
+    barge: 'Interrupt', on: 'on', off: 'off', you: 'You', save: 'Could not save. Please try again.',
+  },
+};
 
 export default function VoiceOverlay({ open, onClose, farmer, lang = 'hi', firstQuestion }) {
   const L = t(lang);
+  const X = TXT[lang] || TXT.hi;
   const [state, setState] = useState('idle'); // idle | listening | thinking | speaking
   const [userCap, setUserCap] = useState('');
   const [aiCap, setAiCap] = useState('');
@@ -18,70 +35,98 @@ export default function VoiceOverlay({ open, onClose, farmer, lang = 'hi', first
   const [pending, setPending] = useState(null);
   const [typed, setTyped] = useState('');
   const [hint, setHint] = useState('');
+  const [micMuted, setMicMuted] = useState(false);
+  const [voiceMuted, setVoiceMuted] = useState(false);
+  const [barge, setBarge] = useState(true);
+
   const history = useRef([]);
   const alive = useRef(false);
+  const runId = useRef(0);
   const pendingRef = useRef(null);
-  const turnBusy = useRef(false); // true while a listen() cycle is starting/running, so rapid orb taps don't start a second one
+  const micMutedRef = useRef(false);
+  const voiceMutedRef = useRef(false);
   pendingRef.current = pending;
+  micMutedRef.current = micMuted;
+  voiceMutedRef.current = voiceMuted;
+
+  useEffect(() => { setBarge(bargeInEnabled()); }, []);
 
   useEffect(() => {
     if (!open) return;
     alive.current = true;
-    turnBusy.current = false;
+    stopSpeaking(); // the home greeting must not be heard as the farmer's words
     setUserCap(''); setCard(null); setPending(null); setHint('');
     setAiCap(sttSupported() ? '' : L.noMic);
-    if (firstQuestion) { setUserCap(firstQuestion); handleText(firstQuestion); }
-    else turn({ userTapped: true });
-    return () => { alive.current = false; stopListening(); stopSpeaking(); };
+    conversation(firstQuestion || null, { userTapped: !firstQuestion });
+    return () => { alive.current = false; runId.current++; cancelListening(); stopSpeaking(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  async function say(text) {
-    setAiCap(text);
-    setState('speaking');
-    await speak(text, lang);
-    if (alive.current) setState('idle');
-  }
+  /* ---------- the conversation loop ---------- */
+  async function conversation(startText, { userTapped = false, reply: startReply = null } = {}) {
+    const id = ++runId.current;
+    const live = () => alive.current && id === runId.current;
+    let input = startText;
+    let retried = false;
+    let preset = startReply; // an answer that is already known (e.g. after tapping हाँ)
 
-  // One listening turn. userTapped=true means the farmer pressed the mic, so we retry once if we heard nothing.
-  async function turn({ userTapped = false, retried = false } = {}) {
-    if (!alive.current || turnBusy.current) return; // already starting/running a listen() cycle
-    turnBusy.current = true;
-    await new Promise((r) => setTimeout(r, 250)); // let the speaker go quiet before the mic opens
-    if (!alive.current) { turnBusy.current = false; return; }
-    setState('listening');
-    setHint('');
-    setUserCap('');
-    const r = await listen({ lang, onInterim: setUserCap });
-    turnBusy.current = false;
-    if (!alive.current) return;
-    if (r.error === 'not-allowed') { setState('idle'); setAiCap(L.noMic); return; }
-    if (!r.text) {
-      setState('idle');
-      if (userTapped && !retried) {
-        await say(lang === 'en' ? "Sorry, I couldn't hear you. Please speak again." : 'माफ़ कीजिए, मैं आपको सुन नहीं पाई। कृपया दोबारा बोलिए।');
-        return turn({ userTapped: true, retried: true });
+    while (live()) {
+      // 1) get what the farmer said
+      if (!input && !preset) {
+        if (micMutedRef.current) { setState('idle'); setHint(X.muted); return; }
+        setState('listening'); setHint(''); setUserCap('');
+        const r = await listen({ lang, onInterim: setUserCap });
+        if (!live()) return;
+        if (r.error === 'not-allowed') { setState('idle'); setAiCap(L.noMic); return; }
+        if (!r.text) {
+          if (userTapped && !retried && !micMutedRef.current) {
+            retried = true;
+            setAiCap(X.sorry); setState('speaking');
+            if (!voiceMutedRef.current) await speak(X.sorry, lang);
+            continue;
+          }
+          setState('idle'); setHint(micMutedRef.current ? X.muted : X.hint); return;
+        }
+        input = r.text;
       }
-      setHint(HINT[lang] || HINT.hi); // stay idle, farmer taps the orb to talk again
-      return;
+      if (input) setUserCap(input);
+
+      // 2) think
+      const reply = preset || (await respond(input));
+      preset = null; input = null; userTapped = false;
+      if (!live()) return;
+      if (!reply) continue;
+
+      // 3) answer, with the mic open for the farmer's next words
+      setAiCap(reply);
+      if (voiceMutedRef.current) {
+        if (micMutedRef.current) { setState('idle'); return; }
+        continue; // no voice: go straight back to listening
+      }
+      setState('speaking');
+      const r = await speakAndListen(reply, {
+        lang,
+        bargeIn: barge && !micMutedRef.current,
+        listenAfter: !micMutedRef.current,
+        onInterim: (t) => { setUserCap(t); },
+        onBargeIn: () => setState('listening'),
+        onListening: (on) => { if (on && live()) setState('listening'); },
+      });
+      if (!live()) return;
+      if (r.text) { input = r.text; continue; }
+      setState('idle'); setHint(micMutedRef.current ? X.muted : X.hint); return;
     }
-    setUserCap(r.text);
-    await handleText(r.text);
   }
 
-  async function handleText(text) {
-    // 1) A pending action waiting for "haan ya na"
+  /* ---------- one answer: confirm a pending action, or ask the AI ---------- */
+  async function respond(text) {
     const p = pendingRef.current;
     if (p) {
       const yn = yesNo(text);
-      if (yn === 'yes') return confirm(true);
-      if (yn === 'no') return confirm(false);
-      // not a yes/no: drop the pending action and treat as a new question
-      setPending(null);
+      if (yn) return confirmAction(yn === 'yes');
+      setPending(null); // not a yes/no: treat as a new question
     }
-    // 2) Ask the brain
     setState('thinking');
-    setHint('');
     setCard(null);
     try {
       const res = await fetch('/api/chat', {
@@ -90,22 +135,19 @@ export default function VoiceOverlay({ open, onClose, farmer, lang = 'hi', first
         body: JSON.stringify({ farmerId: farmer?.id, farmer, lang, message: text, history: history.current }),
       });
       const data = await res.json();
-      if (!alive.current) return;
-      history.current = [...history.current, { role: 'user', text }, { role: 'assistant', text: data.reply }].slice(-12);
+      history.current = [...history.current, { role: 'user', text }, { role: 'assistant', text: data.reply }].slice(-10);
       setCard(data.cards?.[0] || null);
       setPending(data.pending || null);
-      await say(data.reply);
+      return data.reply;
     } catch {
-      await say(L.offline);
+      return L.offline;
     }
-    // hands-free: listen again after answering
-    if (alive.current) turn({ userTapped: false });
   }
 
-  async function confirm(yes) {
+  async function confirmAction(yes) {
     const p = pendingRef.current;
     setPending(null);
-    if (!yes || !p) { await say(L.cancelled); if (alive.current) turn(); return; }
+    if (!yes || !p) return L.cancelled;
     setState('thinking');
     try {
       const res = await fetch('/api/actions', {
@@ -114,39 +156,78 @@ export default function VoiceOverlay({ open, onClose, farmer, lang = 'hi', first
         body: JSON.stringify({ farmerId: farmer?.id, type: p.type, partnerId: p.partnerId, payload: p.payload }),
       });
       const out = await res.json();
-      const msg = out.ok ? (lang === 'en' ? out.message_en : out.message_hi) : (lang === 'en' ? 'Could not save. Please try again.' : 'सेव नहीं हो पाया, दोबारा कोशिश करें।');
+      const msg = out.ok ? (lang === 'en' ? out.message_en : out.message_hi) : X.save;
       history.current = [...history.current, { role: 'assistant', text: msg }];
-      await say(msg);
+      return msg;
     } catch {
-      await say(L.offline);
+      return L.offline;
     }
-    if (alive.current) turn();
   }
 
+  /* ---------- controls ---------- */
   function orbTap() {
-    if (state === 'listening') { stopListening(); return; }
-    if (state === 'speaking') { stopSpeaking(); setState('idle'); return; }
-    if (state === 'idle') turn({ userTapped: true });
+    if (state === 'speaking') { stopSpeaking(); return; }      // mic is already open: just talk
+    if (state === 'listening') { stopListening(); return; }    // "I'm done", send now
+    if (state === 'idle') {
+      if (micMuted) setMicMuted(false);
+      conversation(null, { userTapped: true });
+    }
+  }
+
+  function toggleMic() {
+    const next = !micMuted;
+    setMicMuted(next);
+    micMutedRef.current = next;
+    if (next) { cancelListening(); }
+    else if (state === 'idle') conversation(null, { userTapped: true });
+  }
+
+  function toggleVoice() {
+    const next = !voiceMuted;
+    setVoiceMuted(next);
+    voiceMutedRef.current = next;
+    if (next) stopSpeaking();
+  }
+
+  function toggleBarge() {
+    const next = !barge;
+    setBarge(next);
+    setBargeIn(next);
+  }
+
+  async function confirmTap(yes) {
+    runId.current++; // stop the running loop
+    cancelListening(); stopSpeaking();
+    const id = runId.current;
+    const msg = await confirmAction(yes);
+    if (!alive.current || id !== runId.current) return;
+    conversation(null, { reply: msg });
   }
 
   function sendTyped(e) {
     e.preventDefault();
     const v = typed.trim();
-    if (!v) return;
+    if (!v || state === 'thinking') return;
     setTyped('');
     setUserCap(v);
-    if (state === 'listening') submitTyped(v); // resolves the active listen()
-    else { stopSpeaking(); handleText(v); }
+    if (isListening()) submitTyped(v); // ends the current turn with this text
+    else { stopSpeaking(); conversation(v); }
   }
 
   function close() {
     alive.current = false;
-    stopListening(); stopSpeaking();
+    runId.current++;
+    cancelListening(); stopSpeaking();
     onClose?.();
   }
 
   if (!open) return null;
-  const status = { idle: L.tapMic, listening: L.listening, thinking: L.thinking, speaking: L.speaking }[state];
+  const status = {
+    idle: hint || L.tapMic,
+    listening: L.listening,
+    thinking: L.thinking,
+    speaking: barge && !micMuted ? X.speakingOpen : L.speaking,
+  }[state];
 
   return (
     <div className="vo" role="dialog" aria-modal="true" aria-label="Voice assistant">
@@ -155,24 +236,33 @@ export default function VoiceOverlay({ open, onClose, farmer, lang = 'hi', first
         <button className="vo-close" onClick={close} aria-label={L.close}><Icon name="x" /></button>
       </div>
 
+      <div className="vo-side">
+        <button className={`vo-tg ${micMuted ? 'off' : ''}`} onClick={toggleMic} aria-pressed={micMuted} aria-label={micMuted ? X.micOff : X.micOn}>
+          <Icon name={micMuted ? 'micOff' : 'mic'} /><span>{micMuted ? X.micOff : X.micOn}</span>
+        </button>
+        <button className={`vo-tg ${voiceMuted ? 'off' : ''}`} onClick={toggleVoice} aria-pressed={voiceMuted} aria-label={voiceMuted ? X.voiceOff : X.voiceOn}>
+          <Icon name={voiceMuted ? 'spkOff' : 'spk'} /><span>{voiceMuted ? X.voiceOff : X.voiceOn}</span>
+        </button>
+        <button className={`vo-tg small ${barge ? '' : 'off'}`} onClick={toggleBarge} aria-pressed={barge}>
+          <span>{X.barge}: {barge ? X.on : X.off}</span>
+        </button>
+      </div>
+
       <div className="vo-mid">
         <button className={`orb ${state}`} onClick={orbTap} aria-label={status}>
-          <Icon name={state === 'speaking' ? 'spk' : 'mic'} />
+          <Icon name={state === 'speaking' ? 'spk' : micMuted ? 'micOff' : 'mic'} />
         </button>
-        {state === 'idle' && hint && !pending && (
-          <p className="mut" style={{ textAlign: 'center', fontSize: 14 }}>{hint}</p>
-        )}
         {card && <MiniCard card={card} lang={lang} />}
         {pending && (
           <div className="vo-confirm">
-            <button className="btn y" onClick={() => confirm(true)}><Icon name="check" />{L.yes}</button>
-            <button className="btn alt" onClick={() => confirm(false)}><Icon name="x" />{L.no}</button>
+            <button className="btn y" onClick={() => confirmTap(true)}><Icon name="check" />{L.yes}</button>
+            <button className="btn alt" onClick={() => confirmTap(false)}><Icon name="x" />{L.no}</button>
           </div>
         )}
       </div>
 
       <div className="caps" aria-live="polite">
-        {userCap && (<div><p className="cap-label">{lang === 'en' ? 'You' : 'आप'}</p><p className="cap-user">{userCap}</p></div>)}
+        {userCap && (<div><p className="cap-label">{X.you}</p><p className="cap-user">{userCap}</p></div>)}
         {aiCap && (<div><p className="cap-label">Kisan Pulse</p><p className="cap-ai">{aiCap}</p></div>)}
       </div>
 

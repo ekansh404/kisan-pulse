@@ -125,3 +125,12 @@ svg.i { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-widt
 .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--nav-h) + 14px); width: calc(100% - 32px); max-width: 448px; background: var(--ink); color: #fff; border-radius: 14px; padding: 12px 16px; font-size: 15px; z-index: 30; }
 
 @media (prefers-reduced-motion: reduce) { .mic-giant, .orb, .vo { animation: none !important; } }
+
+/* voice mode: side controls (mic / voice mute, barge-in) */
+.vo { position: fixed; }
+.vo-side { position: absolute; right: 12px; top: 84px; display: flex; flex-direction: column; gap: 10px; z-index: 2; }
+.vo-tg { width: 66px; min-height: 62px; border-radius: 18px; border: 1.5px solid rgba(255,255,255,.28); background: rgba(255,255,255,.12); color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-size: 11px; font-weight: 700; padding: 6px 4px; text-align: center; line-height: 1.1; }
+.vo-tg svg.i { width: 24px; height: 24px; }
+.vo-tg.off { background: #F4E3B0; color: #5A2A05; border-color: #F4E3B0; }
+.vo-tg.small { min-height: 44px; font-size: 10px; }
+.orb.listening { background: #F7C948; }

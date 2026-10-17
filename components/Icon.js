@@ -1,6 +1,8 @@
 // Stroke icons (no emoji, no icon library). Usage: <Icon name="mic" />
 const P = {
   mic: <><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0014 0" /><path d="M12 18v3" /></>,
+  micOff: <><path d="M15 9.5V6a3 3 0 00-6 0v5a3 3 0 004.5 2.6" /><path d="M5 11a7 7 0 0011.3 5.5" /><path d="M19 11a7 7 0 01-.6 2.8" /><path d="M12 18v3" /><path d="M3 3l18 18" /></>,
+  spkOff: <><path d="M11 5L6 9H3v6h3l5 4V5z" /><path d="M16 9l5 6" /><path d="M21 9l-5 6" /></>,
   spk: <><path d="M11 5L6 9H3v6h3l5 4V5z" /><path d="M15.5 8.5a5 5 0 010 7" /><path d="M18.5 5.5a9 9 0 010 13" /></>,
   home: <><path d="M3 11l9-7 9 7" /><path d="M5 10v10h14V10" /></>,
   leaf: <><path d="M12 21V11" /><path d="M12 11C12 6 8 4 4 4c0 5 3 7 8 7z" /><path d="M12 13c0-4 3-6 8-6 0 4-3 6-8 6z" /></>,
