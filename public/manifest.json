@@ -1,0 +1,9 @@
+{
+  "name": "Kisan Pulse",
+  "short_name": "Kisan Pulse",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F3F6EE",
+  "theme_color": "#1F5A33",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
