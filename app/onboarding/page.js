@@ -5,9 +5,9 @@
 import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Icon from '@/components/Icon';
-import { askWithRetry, speak, submitTyped, yesNo, stopListening, stopSpeaking } from '@/lib/voice';
+import { askWithRetry, speak, submitTyped, yesNo, stopListening, cancelListening, stopSpeaking, isSpeaking } from '@/lib/voice';
 import { setFarmer, setLang as saveLang } from '@/lib/session';
-import { parsePhone, parseOtp, detectLang, toAcres, extract } from '@/lib/onboarding';
+import { parsePhone, parseOtp, detectLang, toAcres, extract, parseName, parseLand, parseCrops, placeCandidates } from '@/lib/onboarding';
 import { sendOtp, verifyOtp, OTP_MODE, OTP_LEN, DEMO_OTP } from '@/lib/firebase';
 
 // Everything the assistant says, in both languages
@@ -92,93 +92,115 @@ export default function Onboarding() {
   const [userCap, setUserCap] = useState('');
   const [step, setStep] = useState(0);
   const [typed, setTyped] = useState('');
+  const [problem, setProblem] = useState('');
   const langRef = useRef('hi');
 
   const onCaption = ({ who, text }) => (who === 'ai' ? (setAiCap(text), setUserCap('')) : setUserCap(text));
 
-  // ask until we get a valid answer (farmer can always type instead)
-  async function ask(q, validate) {
+  // Ask until we get a valid answer (the farmer can always type instead).
+  // silenceMs: how long a pause ends the answer. Numbers get longer (people pause between digits).
+  async function ask(q, validate, silenceMs = 1800) {
     for (;;) {
-      const r = await askWithRetry(q, { lang: langRef.current, validate, onCaption, onListening: setListening });
+      const r = await askWithRetry(q, { lang: langRef.current, validate, onCaption, onListening: setListening, silenceMs });
       if (r.ok) return r.value;
+      if (r.reason === 'denied') throw new Error(langRef.current === 'en' ? 'Microphone permission denied. Allow the mic in Chrome, or type below.' : 'माइक की अनुमति नहीं मिली। Chrome में माइक Allow करें या नीचे लिखें।');
       q = langRef.current === 'en' ? 'You can also type the answer below. ' + q : 'आप नीचे लिखकर भी जवाब दे सकते हैं। ' + q;
     }
   }
   const yn = (text) => { const v = yesNo(text); return v ? { ok: true, value: v } : { ok: false, reask: S[langRef.current].yn }; };
-  const tell = async (text) => { setAiCap(text); setUserCap(''); await speak(text, langRef.current); };
+  const tell = async (text) => { setAiCap(text); setUserCap(''); setListening(false); await speak(text, langRef.current); };
+  const fail = async (T, why) => {
+    setProblem(why || '');
+    await tell(T.error);
+  };
 
   async function run() {
     setStarted(true);
+    setProblem('');
     try {
-      // 1. Namaskar + language (always asked in Hindi first)
+      // 1. Namaskar + language (asked in Hindi). Anything said in Hindi counts as Hindi.
       setStep(0);
-      const lang = await ask(S.hi.lang, (t) => { const l = detectLang(t); return l ? { ok: true, value: l } : { ok: false, reask: S.hi.langRe }; });
+      const lang = await ask(S.hi.lang, (t) => {
+        const l = detectLang(t) || (/[ऀ-ॿ]/.test(t) ? 'hi' : null);
+        return l ? { ok: true, value: l } : { ok: false, reask: S.hi.langRe };
+      });
       langRef.current = lang;
       saveLang(lang);
       const T = S[lang];
 
-      // 2. Name (repeat back to confirm)
+      // 2. Name (local parse first, AI only if needed; read back to confirm)
       setStep(1);
       let name;
       for (;;) {
         name = await ask(T.name, async (t) => {
-          const words = t.trim().split(/\s+/);
-          if (words.length <= 2 && !/naam|नाम|name/i.test(t)) return { ok: true, value: t.trim() };
+          const local = parseName(t);
+          if (local) return { ok: true, value: local };
           const x = await extract('name', t, lang);
           return x.ok && x.value ? { ok: true, value: x.value } : { ok: false, reask: T.nameRe };
         });
         if ((await ask(T.nameOk(name), yn)) === 'yes') break;
       }
 
-      // 3. Mobile + OTP
+      // 3. Mobile + OTP (longer pause allowed while saying digits)
       setStep(2);
       let phone;
       for (;;) {
         phone = await ask(T.phone(name), async (t) => {
           const p = parsePhone(t) || (await extract('phone', t, lang).then((x) => (x.ok ? parsePhone(String(x.value)) : null)));
           return p ? { ok: true, value: p } : { ok: false, reask: T.phoneRe };
-        });
+        }, 2800);
         if ((await ask(T.phoneOk(phone), yn)) === 'yes') break;
       }
       let sent = await sendOtp(phone);
       if (!sent.ok) { await tell(T.otpFail); sent = await sendOtp(phone); }
-      if (!sent.ok) { await tell(T.error); return setStarted(false); }
+      if (!sent.ok) { await fail(T, 'OTP: ' + (sent.error || 'send failed')); return; }
 
       let proof = null;
       for (let i = 0; i < 4 && !proof; i++) {
         const code = await ask(i === 0 ? T.otpSent : T.otpWrong, async (t) => {
           const c = parseOtp(t, OTP_LEN) || (await extract('otp', t, lang).then((x) => (x.ok ? parseOtp(String(x.value), OTP_LEN) : null)));
           return c ? { ok: true, value: c } : { ok: false, reask: T.otpRe };
-        });
+        }, 2800);
         const v = await verifyOtp(code);
         if (v.ok) proof = v.proof;
       }
-      if (!proof) { await tell(T.error); return setStarted(false); }
+      if (!proof) { await fail(T, 'OTP not verified'); return; }
 
-      // Returning farmer? -> greet again and go home
+      // Returning farmer? -> welcome back -> home
       const login = await post({ action: 'login', phone, proof });
-      if (!login.ok) { await tell(T.error); return setStarted(false); }
+      if (!login.ok) { await fail(T, 'Login: ' + (login.error || 'server error')); return; }
       if (login.exists) {
         setFarmer({ ...login.farmer, lang });
         await tell(T.welcomeBack(login.farmer.name));
-        return router.replace('/');
+        return goHome();
       }
 
       // ---------- New farmer: registration ----------
       await tell(T.newUser);
 
-      // 4. Village / district -> real geocoding
+      // 4. Village / district -> real geocoding (Hindi names mapped locally, AI as backup)
       setStep(3);
       let place;
       for (;;) {
         place = await ask(T.place, async (t) => {
-          const x = await extract('place', t, lang);
-          const v = x.ok ? x.value : { district: t };
-          const g = (v.village && (await geo(v.village))) || (v.district && (await geo(v.district)));
+          let g = null;
+          let village = null;
+          const cands = placeCandidates(t).slice(0, 4);
+          for (const c of cands) {
+            g = await geo(c);
+            if (g) { village = c; break; }
+          }
+          if (!g) {
+            const x = await extract('place', t, lang);
+            if (x.ok) {
+              g = (x.value.village && (await geo(x.value.village))) || (x.value.district && (await geo(x.value.district)));
+              village = x.value.village || x.value.district;
+            }
+          }
           if (!g) return { ok: false, reask: T.placeRe };
-          return { ok: true, value: { village: v.village || g.name, district: g.district || v.district, state: g.state || v.state, lat: g.lat, lon: g.lon } };
+          return { ok: true, value: { village: village || g.name, district: g.district || g.name, state: g.state || '', lat: g.lat, lon: g.lon } };
         });
-        if ((await ask(T.placeOk(place.district, place.state), yn)) === 'yes') break;
+        if ((await ask(T.placeOk(place.district, place.state || 'India'), yn)) === 'yes') break;
       }
 
       // 5. Land
@@ -186,9 +208,11 @@ export default function Onboarding() {
       let land;
       for (;;) {
         land = await ask(T.land, async (t) => {
+          const local = parseLand(t);
+          if (local) return { ok: true, value: local };
           const x = await extract('land', t, lang);
           return x.ok && Number(x.value?.value) > 0 ? { ok: true, value: x.value } : { ok: false, reask: T.landRe };
-        });
+        }, 2200);
         land.acres = toAcres(land.value, land.unit);
         const unitWord = lang === 'en' ? land.unit : { bigha: 'बीघा', acre: 'एकड़', hectare: 'हेक्टेयर', biswa: 'बिस्वा' }[land.unit] || land.unit;
         if ((await ask(T.landOk(land.value, unitWord, land.acres), yn)) === 'yes') break;
@@ -197,42 +221,51 @@ export default function Onboarding() {
       // 6. Crops
       setStep(5);
       const crops = await ask(T.crops, async (t) => {
+        const local = parseCrops(t);
+        if (local.length) return { ok: true, value: local };
         const x = await extract('crops', t, lang);
         return x.ok && x.value?.length ? { ok: true, value: x.value } : { ok: false, reask: T.cropsRe };
-      });
+      }, 2200);
 
       // 7. Farmer ID (SIMULATED — real AgriStack verification needs a state MoU)
       setStep(6);
       let farmer_id_sim;
       if ((await ask(T.fid, yn)) === 'yes') {
         farmer_id_sim = await ask(T.fidNum, async (t) => {
-          const x = await extract('farmer_id', t, lang);
-          return x.ok ? { ok: true, value: String(x.value) } : { ok: false };
-        });
+          const id = t.replace(/[^a-z0-9]/gi, '').toUpperCase();
+          return id.length >= 4 ? { ok: true, value: id } : { ok: false };
+        }, 2800);
         await tell(T.fidOk);
       } else {
-        farmer_id_sim = 'SIM-' + (place.state || 'IN').slice(0, 2).toUpperCase() + '-' + Math.floor(10000000 + Math.random() * 89999999);
+        farmer_id_sim = 'SIM-' + ((place.state || 'IN').split(/\s+/).map((w) => w[0]).join('').toUpperCase() || 'IN') + '-' + Math.floor(10000000 + Math.random() * 89999999);
         await tell(T.fidMade);
       }
 
       // 8. Consent
       setStep(7);
-      if ((await ask(T.consent, yn)) !== 'yes') { await tell(T.noConsent); return setStarted(false); }
+      if ((await ask(T.consent, yn)) !== 'yes') { await tell(T.noConsent); setStarted(false); return; }
 
-      // 9. Save
+      // 9. Save -> home
       const reg = await post({
         action: 'register', phone, proof,
         profile: { name, lang, ...place, land_value: land.value, land_unit: land.unit, land_acres: land.acres, crops, farmer_id_sim },
       });
-      if (!reg.ok) { await tell(T.error); return setStarted(false); }
+      if (!reg.ok || !reg.farmer) { await fail(T, 'Register: ' + (reg.error || 'server error')); return; }
       setFarmer({ ...reg.farmer, lang });
       await tell(T.saved(name));
-      router.replace('/');
+      goHome();
     } catch (e) {
       console.error(e);
+      setProblem(String(e?.message || e));
       await tell(S[langRef.current].error);
-      setStarted(false);
     }
+  }
+
+  // Go to home. If the router doesn't move (old cached page), force a full load.
+  function goHome() {
+    cancelListening(); stopSpeaking();
+    router.replace('/');
+    setTimeout(() => { if (location.pathname.startsWith('/onboarding')) location.href = '/'; }, 1500);
   }
 
   function send(e) {
@@ -240,6 +273,12 @@ export default function Onboarding() {
     if (!typed.trim()) return;
     submitTyped(typed);
     setTyped('');
+  }
+
+  // Tap the orb: while it talks = skip to answering; while listening = "I'm done"
+  function orbTap() {
+    if (isSpeaking()) stopSpeaking();
+    else stopListening();
   }
 
   const T = S[langRef.current];
@@ -270,11 +309,19 @@ export default function Onboarding() {
             <span key={s} style={{ width: 22, height: 6, borderRadius: 3, background: i <= step ? 'var(--tur)' : 'rgba(255,255,255,.25)' }} />
           ))}
         </div>
-        <button className="vo-close" onClick={() => { stopListening(); stopSpeaking(); location.reload(); }} aria-label="Restart"><Icon name="x" /></button>
+        <button className="vo-close" onClick={() => { cancelListening(); stopSpeaking(); location.reload(); }} aria-label="Restart"><Icon name="x" /></button>
       </div>
       <div className="vo-mid">
-        <span className={`orb ${listening ? 'listening' : 'speaking'}`} aria-hidden="true"><Icon name={listening ? 'mic' : 'spk'} /></span>
-        <p className="vo-status">{listening ? (langRef.current === 'en' ? 'Listening… speak now' : 'सुन रही हूँ… अब बोलिए') : ''}</p>
+        <button className={`orb ${listening ? 'listening' : 'speaking'}`} onClick={orbTap} aria-label="Tap when done">
+          <Icon name={listening ? 'mic' : 'spk'} />
+        </button>
+        <p className="vo-status">{listening ? (langRef.current === 'en' ? 'Listening… speak now (tap when done)' : 'सुन रही हूँ… बोलिए (पूरा होने पर दबाएँ)') : ''}</p>
+        {problem && (
+          <div className="vo-card" role="alert">
+            <p className="p" style={{ fontSize: 14 }}>{problem}</p>
+            <button className="btn sm" onClick={run}>{langRef.current === 'en' ? 'Try again' : 'फिर से शुरू करें'}</button>
+          </div>
+        )}
       </div>
       <div className="caps" aria-live="polite">
         {userCap && <div><p className="cap-label">{langRef.current === 'en' ? 'You' : 'आप'}</p><p className="cap-user">{userCap}</p></div>}
@@ -292,9 +339,10 @@ export default function Onboarding() {
 async function post(body) {
   try {
     const r = await fetch('/api/farmer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    return await r.json();
-  } catch {
-    return { ok: false };
+    const j = await r.json().catch(() => ({}));
+    return r.ok ? j : { ok: false, error: j.error || 'HTTP ' + r.status };
+  } catch (e) {
+    return { ok: false, error: 'network' };
   }
 }
 async function geo(q) {
