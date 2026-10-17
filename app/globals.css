@@ -134,3 +134,71 @@ svg.i { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-widt
 .vo-tg.off { background: #F4E3B0; color: #5A2A05; border-color: #F4E3B0; }
 .vo-tg.small { min-height: 44px; font-size: 10px; }
 .orb.listening { background: #F7C948; }
+
+/* ================= Theme v2: colours from the Kisan Pulse logo (leaf green, sun, earth) on warm cream ================= */
+:root {
+  --bg: #FBF7EE;
+  --card: #FFFFFF;
+  --deep: #1E5631;      /* logo dark leaf */
+  --deep-2: #2F7A3A;
+  --leaf: #5A9E3A;      /* logo light leaf */
+  --tur: #F2A81D;       /* logo sun */
+  --sun-1: #FFE08A;
+  --sun-2: #F7B733;
+  --sun-3: #EE8A1C;
+  --earth: #A86B2D;     /* logo hat / soil */
+  --ink: #1F2A1F;
+  --mut: #5C6656;
+  --line: #ECE4D3;
+  --soft: #EEF5E6;
+}
+html, body { background: var(--bg); }
+.shell { background: radial-gradient(120% 40% at 50% 0%, #FFF4D6 0%, var(--bg) 60%); }
+button:focus-visible, a:focus-visible, input:focus-visible { outline-color: var(--sun-3); }
+
+/* header: light, with logo */
+.hd { background: rgba(255, 252, 244, .92); color: var(--deep); border-bottom: 1px solid var(--line); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+.hd-logo { width: 40px; height: 48px; object-fit: contain; flex-shrink: 0; }
+.hd .tt b { color: var(--deep); }
+.hd .tt span { color: var(--mut); opacity: 1; }
+.hb { background: var(--soft); color: var(--deep); }
+
+/* surfaces + buttons */
+.card { box-shadow: 0 1px 2px rgba(60, 45, 20, .06), 0 6px 18px rgba(60, 45, 20, .06); border: 1px solid var(--line); }
+.btn { background: linear-gradient(180deg, var(--deep-2), var(--deep)); }
+.btn.alt { background: #fff; color: var(--deep); border: 2px solid var(--deep); }
+.btn.y { background: linear-gradient(180deg, var(--sun-2), var(--sun-3)); color: #3B2A10; }
+.ex { border: 1.5px solid var(--line); background: #fff; color: var(--deep); box-shadow: 0 1px 2px rgba(60,45,20,.06); }
+.spk { background: var(--soft); color: var(--deep); }
+.nav { background: rgba(255, 252, 244, .96); border-top: 1px solid var(--line); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+.nb[aria-current="page"] { color: var(--deep); }
+.nb[aria-current="page"] svg.i { color: var(--leaf); }
+
+/* home: sun mic */
+.mic-giant { background: radial-gradient(circle at 35% 30%, var(--sun-1), var(--sun-2) 45%, var(--sun-3)); color: #3B2A10; border: 8px solid #fff; box-shadow: 0 14px 40px rgba(238, 138, 28, .35); animation: sunPulse 2.2s ease-out infinite; }
+@keyframes sunPulse { 0% { box-shadow: 0 14px 40px rgba(238,138,28,.35), 0 0 0 0 rgba(247,183,51,.55); } 100% { box-shadow: 0 14px 40px rgba(238,138,28,.35), 0 0 0 42px rgba(247,183,51,0); } }
+.mic-label { color: var(--deep); }
+.greet-row { display: flex; align-items: center; gap: 12px; }
+.greet-row img { width: 46px; height: 55px; object-fit: contain; }
+
+/* voice mode: warm daylight instead of dark green */
+.vo { background: radial-gradient(90% 55% at 50% 36%, #FFF1C9 0%, #FBF7EE 55%, #F2EBDA 100%); color: var(--ink); }
+.vo-brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.vo-brand img { width: 34px; height: 40px; object-fit: contain; }
+.vo-status { color: var(--deep); }
+.vo-close { background: #fff; color: var(--deep); box-shadow: 0 2px 8px rgba(60,45,20,.12); }
+.orb { background: radial-gradient(circle at 35% 30%, var(--sun-1), var(--sun-2) 45%, var(--sun-3)); color: #3B2A10; border: 8px solid #fff; box-shadow: 0 16px 44px rgba(238,138,28,.35); }
+.orb.listening { background: radial-gradient(circle at 35% 30%, #D8F0B8, #8CC152 50%, var(--leaf)); color: #fff; animation: orbL2 1.2s ease-in-out infinite; }
+.orb.thinking { background: radial-gradient(circle at 35% 30%, #fff, var(--sun-1)); animation: orbS .9s ease-in-out infinite alternate; }
+@keyframes orbL2 { 0%,100% { box-shadow: 0 16px 44px rgba(90,158,58,.35), 0 0 0 0 rgba(90,158,58,.45); } 50% { box-shadow: 0 16px 44px rgba(90,158,58,.35), 0 0 0 26px rgba(90,158,58,0); } }
+.vo-card { background: #fff; border: 1px solid var(--line); box-shadow: 0 6px 20px rgba(60,45,20,.08); }
+.caps { background: linear-gradient(rgba(251,247,238,0), rgba(255,253,247,.96) 22%); }
+.cap-label { color: var(--leaf); opacity: 1; }
+.cap-user { color: var(--mut); }
+.cap-ai { color: var(--ink); }
+.vo-type input { background: #fff; border: 1.5px solid var(--line); color: var(--ink); }
+.vo-type button { background: linear-gradient(180deg, var(--sun-2), var(--sun-3)); color: #3B2A10; }
+.vo-tg { background: #fff; border: 1.5px solid var(--line); color: var(--deep); box-shadow: 0 2px 8px rgba(60,45,20,.08); }
+.vo-tg.off { background: #FDE9C4; border-color: #F5C97A; color: #7A4A0A; }
+.vo .mut { color: var(--mut); }
+.ob-logo { width: 120px; height: 144px; object-fit: contain; filter: drop-shadow(0 8px 18px rgba(60,45,20,.15)); }

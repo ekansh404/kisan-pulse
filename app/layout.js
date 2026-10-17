@@ -5,7 +5,7 @@ export const metadata = {
   description: 'Voice-first farming assistant',
   manifest: '/manifest.json',
 };
-export const viewport = { width: 'device-width', initialScale: 1, viewportFit: 'cover', themeColor: '#1F5A33' };
+export const viewport = { width: 'device-width', initialScale: 1, viewportFit: 'cover', themeColor: '#FBF7EE' };
 
 export default function RootLayout({ children }) {
   return (
@@ -14,7 +14,8 @@ export default function RootLayout({ children }) {
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
         <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Mukta:wght@400;500;600;700&display=swap" rel="stylesheet" />
-        <link rel="icon" href="/icon.svg" />
+        <link rel="icon" href="/icon-192.png" />
+        <link rel="apple-touch-icon" href="/icon-192.png" />
       </head>
       <body>
         <div className="shell">{children}</div>
