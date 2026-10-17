@@ -14,6 +14,7 @@ export default function Home() {
   const router = useRouter();
   const { farmer, lang, setLang, ready } = useFarmer();
   const [weather, setWeather] = useState(null);
+  const [weatherError, setWeatherError] = useState(false);
   const [open, setOpen] = useState(false);
   const [firstQ, setFirstQ] = useState(null);
   const greeted = useRef(false);
@@ -27,10 +28,11 @@ export default function Home() {
   // Real weather + alerts for the farmer's location
   useEffect(() => {
     if (!farmer?.lat) return;
+    setWeatherError(false);
     fetch(`/api/weather?lat=${farmer.lat}&lon=${farmer.lon}&lang=${lang}`)
       .then((r) => r.json())
-      .then((w) => { if (!w.error) setWeather(w); })
-      .catch(() => {});
+      .then((w) => { if (w.error) setWeatherError(true); else setWeather(w); })
+      .catch(() => setWeatherError(true));
   }, [farmer, lang]);
 
   const greetingText = () => {
@@ -79,7 +81,13 @@ export default function Home() {
           ))
         ) : weather ? (
           <div className="alert ok"><Icon name="check" /><p className="p">{L.noAlerts}</p></div>
+        ) : weatherError ? (
+          <p className="mut weather-soft">{lang === 'en' ? 'Weather is not available right now.' : 'मौसम अभी उपलब्ध नहीं है'}</p>
         ) : null}
+
+        <button className="spk repeat-btn" onClick={() => speak(greetingText(), lang)}>
+          <Icon name="spk" />{lang === 'en' ? 'Repeat' : 'दोबारा सुनें'}
+        </button>
 
         <section className="mic-zone">
           <button className="mic-giant" onClick={() => { setFirstQ(null); setOpen(true); }} aria-label={L.tapMic}>
