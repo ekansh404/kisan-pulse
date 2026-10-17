@@ -1,11 +1,24 @@
 // POST /api/chat  -> the voice assistant brain (Gemini + tools)
 // body: { farmerId?, farmer?, lang:'hi'|'en', message, history:[{role:'user'|'assistant', text}] }
 // returns: { reply, cards:[], pending: null | {type, partnerId, payload, partner} }
-import { gemini, geminiReady } from '@/lib/gemini';
+import { gemini, geminiReady, stripMarkdown } from '@/lib/gemini';
 import { DECLARATIONS, runTool } from '@/lib/agent/tools';
 import { db } from '@/lib/db';
 
 export const maxDuration = 30;
+
+function busyMessage(lang) {
+  return lang === 'en' ? 'The server is busy right now. Please ask again in a moment.' : 'सर्वर अभी व्यस्त है। कृपया थोड़ी देर में फिर पूछिए।';
+}
+
+// Rejects after ms with a {timeout:true} error so a slow Gemini/tool round never hangs the request.
+function withTimeout(promise, ms) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(Object.assign(new Error('timeout'), { timeout: true })), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 function systemPrompt(f, lang) {
   const today = new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -21,6 +34,7 @@ HOW TO ANSWER (this is read aloud, so):
 - Address the farmer as "${f.name ? f.name + ' जी' : 'आप'}".
 - For weather, prices, soil, schemes, partners: ALWAYS call the tool. Never invent numbers. If a tool returns an error or nothing, say the data is not available right now and suggest what they can do.
 - Crop advice: use your agronomy knowledge for their crop, season (today's date) and the soil/weather tools when useful. Give one clear next step. For pesticide/fertiliser doses, say to follow the product label or the local KVK / agriculture officer.
+- If any tool result contains an "error" field, do not guess or make up a price, temperature, or any other figure in its place. Say plainly that this information is not available right now.
 
 CONFIDENCE RULES:
 - If you have enough information, answer directly and confidently.
@@ -59,26 +73,34 @@ export async function POST(req) {
   let pending = null;
   let reply = '';
   try {
-    for (let round = 0; round < 4; round++) {
-      const out = await gemini({ system: systemPrompt(farmer, lang), contents, tools: DECLARATIONS });
-      if (!out.calls.length) { reply = out.text; break; }
-      contents.push({ role: 'model', parts: out.parts });
-      const responses = [];
-      for (const call of out.calls) {
-        const r = await runTool(call.name, call.args || {}, farmer, lang);
-        if (r.card) cards.push(r.card);
-        if (r.pending) pending = r.pending;
-        responses.push({ functionResponse: { name: call.name, response: r.result } });
-      }
-      contents.push({ role: 'user', parts: responses });
-    }
+    await withTimeout(
+      (async () => {
+        for (let round = 0; round < 4; round++) {
+          const out = await gemini({ system: systemPrompt(farmer, lang), contents, tools: DECLARATIONS });
+          if (!out.calls.length) { reply = out.text; break; }
+          contents.push({ role: 'model', parts: out.parts });
+          const responses = [];
+          for (const call of out.calls) {
+            const r = await runTool(call.name, call.args || {}, farmer, lang);
+            if (r.card) cards.push(r.card);
+            if (r.pending) pending = r.pending;
+            responses.push({ functionResponse: { name: call.name, response: r.result } });
+          }
+          contents.push({ role: 'user', parts: responses });
+        }
+      })(),
+      20000
+    );
   } catch (e) {
     console.error(e);
-    reply = lang === 'en' ? 'Sorry, there is a problem with the internet. Please ask again.' : 'माफ़ कीजिए, इंटरनेट में दिक्कत है। कृपया दोबारा पूछिए।';
+    reply = e?.timeout || e?.busy
+      ? busyMessage(lang)
+      : lang === 'en' ? 'Sorry, there is a problem with the internet. Please ask again.' : 'माफ़ कीजिए, इंटरनेट में दिक्कत है। कृपया दोबारा पूछिए।';
   }
 
   if (!reply) reply = lang === 'en' ? 'Sorry, I could not answer that. Please ask again.' : 'माफ़ कीजिए, मैं जवाब नहीं दे पाई। कृपया दोबारा पूछिए।';
   if (pending && !/हाँ या ना|yes or no/i.test(reply)) reply += lang === 'en' ? ' Shall I confirm? Yes or no?' : ' क्या मैं पक्का कर दूँ? हाँ या ना?';
+  reply = stripMarkdown(reply);
 
   // log (best effort)
   if (s && farmerId) {
