@@ -3,6 +3,8 @@
 //   ELEVENLABS_API_KEY set           -> ElevenLabs (best, very natural Hindi, ~0.3 s to first sound)
 //   TTS_PROVIDER=gemini              -> Gemini TTS with the existing GEMINI_API_KEY (natural, slower, free-tier limits)
 //   otherwise                        -> 204, the phone's built-in voice is used
+import { elevenSpeak } from '@/lib/tts';
+
 export const maxDuration = 30;
 export const dynamic = 'force-dynamic';
 
@@ -23,23 +25,10 @@ export async function GET(req) {
 }
 
 async function eleven(text, lang) {
-  // Pick a Hindi female voice in ElevenLabs -> Voices -> Voice Library, copy its Voice ID into ELEVENLABS_VOICE_ID.
-  const voice = process.env.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM';
-  const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}/stream?output_format=mp3_44100_64`, {
-    method: 'POST',
-    headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY, 'Content-Type': 'application/json', Accept: 'audio/mpeg' },
-    body: JSON.stringify({
-      text,
-      model_id: process.env.ELEVENLABS_MODEL || 'eleven_flash_v2_5',
-      language_code: lang,
-      voice_settings: { stability: 0.45, similarity_boost: 0.8, style: 0.25, use_speaker_boost: true },
-    }),
-  });
-  if (!res.ok || !res.body) {
-    console.error('elevenlabs', res.status, await res.text().catch(() => ''));
-    return new Response(null, { status: 502 });
-  }
-  return new Response(res.body, { headers: { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'no-store' } });
+  const { res, notes } = await elevenSpeak(text, lang);
+  if (notes.length) console.error('elevenlabs', notes.join(' | '));
+  if (!res) return new Response(null, { status: 502, headers: { 'X-TTS-Error': notes.join(' | ').slice(0, 200) } });
+  return new Response(res.body, { headers: { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'no-store', 'X-TTS-Provider': 'elevenlabs' } });
 }
 
 async function geminiTts(text, lang) {

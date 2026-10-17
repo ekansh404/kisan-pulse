@@ -1,9 +1,10 @@
 // GET /api/health -> quick check that every key and the database work (open it in the browser).
 import { db } from '@/lib/db';
+import { elevenSpeak } from '@/lib/tts';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(req) {
   const out = {
     gemini_key: Boolean(process.env.GEMINI_API_KEY),
     gemini_model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
@@ -24,6 +25,12 @@ export async function GET() {
       checks[t] = error ? 'ERROR: ' + error.message : `ok (${count ?? 0} rows)`;
     }
     out.db = checks;
+  }
+  // /api/health?tts=1 -> really asks ElevenLabs for a short clip and reports what happened
+  if (new URL(req.url).searchParams.get('tts') && process.env.ELEVENLABS_API_KEY) {
+    const { res, voice, notes } = await elevenSpeak('नमस्ते, मैं किसान पल्स हूँ।', 'hi');
+    out.tts_test = res ? `ok, speaking with voice ${voice}` : 'ERROR, ElevenLabs refused every attempt';
+    if (notes.length) out.tts_notes = notes;
   }
   return Response.json(out);
 }

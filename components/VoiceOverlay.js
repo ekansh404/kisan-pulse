@@ -8,19 +8,23 @@ import { useEffect, useRef, useState } from 'react';
 import Icon from './Icon';
 import {
   listen, speak, speakAndListen, stopListening, cancelListening, isListening,
-  stopSpeaking, submitTyped, yesNo, sttSupported, bargeInEnabled, setBargeIn,
+  stopSpeaking, submitTyped, yesNo, sttSupported, bargeInEnabled, setBargeIn, canTalkOver,
 } from '@/lib/voice';
+
+const HISTORY_KEY = 'kp_history'; // keeps the conversation when the voice screen is closed and reopened
+const loadHistory = () => { try { return JSON.parse(sessionStorage.getItem(HISTORY_KEY) || '[]'); } catch { return []; } };
+const saveHistory = (h) => { try { sessionStorage.setItem(HISTORY_KEY, JSON.stringify(h.slice(-10))); } catch {} };
 import { t } from '@/lib/i18n';
 
 const TXT = {
   hi: {
     hint: 'माइक दबाकर फिर बोलिए', muted: 'माइक बंद है', sorry: 'माफ़ कीजिए, मैं आपको सुन नहीं पाई। कृपया दोबारा बोलिए।',
-    speakingOpen: 'बोल रही हूँ… आप बीच में बोल सकते हैं', micOn: 'माइक चालू', micOff: 'माइक बंद', voiceOn: 'आवाज़ चालू', voiceOff: 'आवाज़ बंद',
+    speakingOpen: 'बोल रही हूँ… आप बीच में बोल सकते हैं', speakingTap: 'बोल रही हूँ… रोकने के लिए गोला दबाएँ', offline: 'इंटरनेट बंद है। नेट चालू करके फिर पूछिए।', slow: 'जवाब आने में देर हो रही है। कृपया दोबारा पूछिए।', micOn: 'माइक चालू', micOff: 'माइक बंद', voiceOn: 'आवाज़ चालू', voiceOff: 'आवाज़ बंद',
     barge: 'बीच में टोकना', on: 'चालू', off: 'बंद', you: 'आप', save: 'सेव नहीं हो पाया, दोबारा कोशिश करें।',
   },
   en: {
     hint: 'Tap the mic to speak again', muted: 'Mic is muted', sorry: "Sorry, I couldn't hear you. Please speak again.",
-    speakingOpen: 'Speaking… you can talk over me', micOn: 'Mic on', micOff: 'Mic off', voiceOn: 'Voice on', voiceOff: 'Voice off',
+    speakingOpen: 'Speaking… you can talk over me', speakingTap: 'Speaking… tap the circle to stop', offline: 'No internet. Turn on data and ask again.', slow: 'The answer is taking too long. Please ask again.', micOn: 'Mic on', micOff: 'Mic off', voiceOn: 'Voice on', voiceOff: 'Voice off',
     barge: 'Interrupt', on: 'on', off: 'off', you: 'You', save: 'Could not save. Please try again.',
   },
 };
@@ -40,6 +44,7 @@ export default function VoiceOverlay({ open, onClose, farmer, lang = 'hi', first
   const [barge, setBarge] = useState(true);
 
   const history = useRef([]);
+  const chatAbort = useRef(null);
   const alive = useRef(false);
   const runId = useRef(0);
   const pendingRef = useRef(null);
@@ -49,7 +54,21 @@ export default function VoiceOverlay({ open, onClose, farmer, lang = 'hi', first
   micMutedRef.current = micMuted;
   voiceMutedRef.current = voiceMuted;
 
-  useEffect(() => { setBarge(bargeInEnabled()); }, []);
+  useEffect(() => { setBarge(bargeInEnabled()); history.current = loadHistory(); }, []);
+
+  // Keep the screen awake while talking; stop the mic and voice if the app goes to the background
+  useEffect(() => {
+    if (!open) return;
+    let lock = null;
+    const wake = async () => { try { lock = await navigator.wakeLock?.request('screen'); } catch {} };
+    wake();
+    const onVis = () => {
+      if (document.hidden) { runId.current++; cancelListening(); stopSpeaking(); setState('idle'); }
+      else wake();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { document.removeEventListener('visibilitychange', onVis); try { lock?.release(); } catch {} };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -128,19 +147,30 @@ export default function VoiceOverlay({ open, onClose, farmer, lang = 'hi', first
     }
     setState('thinking');
     setCard(null);
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return X.offline;
+    chatAbort.current?.abort(); // a newer question replaces an older one still waiting
+    const ctrl = new AbortController();
+    chatAbort.current = ctrl;
+    const timer = setTimeout(() => ctrl.abort('timeout'), 25000);
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ farmerId: farmer?.id, farmer, lang, message: text, history: history.current }),
+        signal: ctrl.signal,
       });
       const data = await res.json();
+      if (data.debug) console.warn('Kisan Pulse AI:', data.debug);
       history.current = [...history.current, { role: 'user', text }, { role: 'assistant', text: data.reply }].slice(-10);
+      saveHistory(history.current);
       setCard(data.cards?.[0] || null);
       setPending(data.pending || null);
       return data.reply;
-    } catch {
-      return L.offline;
+    } catch (e) {
+      if (ctrl.signal.aborted && ctrl.signal.reason !== 'timeout') return null; // replaced by a newer question
+      return ctrl.signal.reason === 'timeout' ? X.slow : L.offline;
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -158,6 +188,7 @@ export default function VoiceOverlay({ open, onClose, farmer, lang = 'hi', first
       const out = await res.json();
       const msg = out.ok ? (lang === 'en' ? out.message_en : out.message_hi) : X.save;
       history.current = [...history.current, { role: 'assistant', text: msg }];
+      saveHistory(history.current);
       return msg;
     } catch {
       return L.offline;
@@ -215,6 +246,7 @@ export default function VoiceOverlay({ open, onClose, farmer, lang = 'hi', first
   }
 
   function close() {
+    chatAbort.current?.abort();
     alive.current = false;
     runId.current++;
     cancelListening(); stopSpeaking();
@@ -226,7 +258,7 @@ export default function VoiceOverlay({ open, onClose, farmer, lang = 'hi', first
     idle: hint || L.tapMic,
     listening: L.listening,
     thinking: L.thinking,
-    speaking: barge && !micMuted ? X.speakingOpen : L.speaking,
+    speaking: barge && !micMuted && canTalkOver() ? X.speakingOpen : X.speakingTap,
   }[state];
 
   return (
@@ -246,14 +278,22 @@ export default function VoiceOverlay({ open, onClose, farmer, lang = 'hi', first
         <button className={`vo-tg ${voiceMuted ? 'off' : ''}`} onClick={toggleVoice} aria-pressed={voiceMuted} aria-label={voiceMuted ? X.voiceOff : X.voiceOn}>
           <Icon name={voiceMuted ? 'spkOff' : 'spk'} /><span>{voiceMuted ? X.voiceOff : X.voiceOn}</span>
         </button>
-        <button className={`vo-tg small ${barge ? '' : 'off'}`} onClick={toggleBarge} aria-pressed={barge}>
-          <span>{X.barge}: {barge ? X.on : X.off}</span>
-        </button>
+        {canTalkOver() && (
+          <button className={`vo-tg small ${barge ? '' : 'off'}`} onClick={toggleBarge} aria-pressed={barge}>
+            <span>{X.barge}: {barge ? X.on : X.off}</span>
+          </button>
+        )}
       </div>
 
       <div className="vo-mid">
         <button className={`orb ${state}`} onClick={orbTap} aria-label={status}>
-          <Icon name={state === 'speaking' ? 'spk' : micMuted ? 'micOff' : 'mic'} />
+          {state === 'speaking' ? (
+            <span className="bars" aria-hidden="true"><i /><i /><i /><i /><i /></span>
+          ) : state === 'thinking' ? (
+            <span className="dots" aria-hidden="true"><i /><i /><i /></span>
+          ) : (
+            <Icon name={micMuted ? 'micOff' : 'mic'} />
+          )}
         </button>
         {card && <MiniCard card={card} lang={lang} />}
         {pending && (
@@ -264,7 +304,7 @@ export default function VoiceOverlay({ open, onClose, farmer, lang = 'hi', first
         )}
       </div>
 
-      <div className="caps" aria-live="polite">
+      <div className="caps sheet" aria-live="polite">
         {userCap && (<div><p className="cap-label">{X.you}</p><p className="cap-user">{userCap}</p></div>)}
         {aiCap && (<div><p className="cap-label">Kisan Pulse</p><p className="cap-ai">{aiCap}</p></div>)}
       </div>

@@ -122,6 +122,19 @@ function narrate(d = {}, f = {}, lang = 'hi') {
   return out.join(' ');
 }
 
+function normalizeHistory(history = []) {
+  const out = [];
+  for (const h of Array.isArray(history) ? history : []) {
+    const text = String(h?.text || '').trim().slice(0, 700);
+    if (!text) continue;
+    const role = h.role === 'assistant' ? 'assistant' : 'user';
+    if (out.length && out[out.length - 1].role === role) out[out.length - 1].text += ' ' + text;
+    else out.push({ role, text });
+  }
+  while (out.length && out[0].role !== 'user') out.shift();
+  return out.slice(-6).length && out.slice(-6)[0].role !== 'user' ? out.slice(-5) : out.slice(-6);
+}
+
 const msgFor = (lang) => ({
   busy: lang === 'en' ? 'The server is busy right now. Please ask again in a moment.' : 'सर्वर अभी व्यस्त है। कृपया थोड़ी देर में फिर पूछिए।',
   net: lang === 'en' ? 'Sorry, there is a problem with the internet. Please ask again.' : 'माफ़ कीजिए, इंटरनेट में दिक्कत है। कृपया दोबारा पूछिए।',
@@ -144,37 +157,48 @@ export async function POST(req) {
     if (data) farmer = data;
   }
 
-  // Live data the question obviously needs, fetched in parallel
-  const pre = await prefetch(message, farmer, lang);
-  const live = Object.keys(pre.data).length ? `\n\n[LIVE DATA, fetched just now]\n${JSON.stringify(pre.data)}` : '';
+  // Clean conversation history: drop empties, merge same-speaker turns, must start with the farmer.
+  const turns = normalizeHistory(history);
 
-  const contents = [
-    ...history.slice(-6).map((h) => ({ role: h.role === 'assistant' ? 'model' : 'user', parts: [{ text: h.text }] })),
-    { role: 'user', parts: [{ text: message + live }] },
-  ];
+  // Live data the question needs. Follow-ups like "इसके कागज़ क्या लगेंगे?" have no keywords,
+  // so we also look at the farmer's previous question to carry the topic forward.
+  const lastUser = [...turns].reverse().find((t) => t.role === 'user')?.text || '';
+  let pre = await prefetch(message, farmer, lang);
+  if (!Object.keys(pre.data).length && lastUser && message.split(/\s+/).length <= 8) pre = await prefetch(lastUser + ' ' + message, farmer, lang);
+  const live = Object.keys(pre.data).length ? `\n\n[LIVE DATA, fetched just now]\n${JSON.stringify(pre.data)}` : '';
 
   const cards = [...pre.cards];
   let pending = null;
   let reply = '';
-  try {
-    for (let round = 0; round < 3; round++) {
-      const out = await gemini({ system: systemPrompt(farmer, lang), contents, tools: DECLARATIONS, maxTokens: 500, timeoutMs: 9000, think: round === 0 });
-      if (!out.calls.length) { reply = out.text; break; }
-      contents.push({ role: 'model', parts: out.parts });
-      const results = await Promise.all(out.calls.map((c) => runTool(c.name, c.args || {}, farmer, lang)));
-      const responses = out.calls.map((c, i) => {
-        const r = results[i];
-        if (r.card) cards.push(r.card);
-        if (r.pending) pending = r.pending;
-        return { functionResponse: { name: c.name, response: r.result } };
-      });
-      contents.push({ role: 'user', parts: responses });
+  let debug = '';
+
+  // Attempt 1: full conversation with tools. Attempt 2 (if Gemini rejects it): one compact turn.
+  const attempts = [
+    () => [...turns.map((t) => ({ role: t.role === 'assistant' ? 'model' : 'user', parts: [{ text: t.text }] })), { role: 'user', parts: [{ text: message + live }] }],
+    () => [{ role: 'user', parts: [{ text: (turns.length ? `Conversation so far:\n${turns.map((t) => (t.role === 'user' ? 'Farmer: ' : 'You: ') + t.text).join('\n')}\n\nFarmer now says: ` : '') + message + live }] }],
+  ];
+  for (let a = 0; a < attempts.length && !reply; a++) {
+    const contents = attempts[a]();
+    try {
+      for (let round = 0; round < 3; round++) {
+        const out = await gemini({ system: systemPrompt(farmer, lang), contents, tools: DECLARATIONS, maxTokens: 500, timeoutMs: 9000, think: a === 0 && round === 0 });
+        if (!out.calls.length) { reply = out.text; break; }
+        contents.push({ role: 'model', parts: out.parts });
+        const results = await Promise.all(out.calls.map((c) => runTool(c.name, c.args || {}, farmer, lang)));
+        const responses = out.calls.map((c, i) => {
+          const r = results[i];
+          if (r.card) cards.push(r.card);
+          if (r.pending) pending = r.pending;
+          return { functionResponse: { name: c.name, response: r.result && typeof r.result === 'object' && !Array.isArray(r.result) ? r.result : { result: r.result } } };
+        });
+        contents.push({ role: 'user', parts: responses });
+      }
+    } catch (e) {
+      console.error(`chat attempt ${a + 1} failed`, e?.message);
+      debug = String(e?.message || e).slice(0, 300);
     }
-  } catch (e) {
-    console.error('chat error', e);
-    // AI unavailable: still tell the farmer the real data we already fetched, instead of "server busy"
-    reply = narrate(pre.data, farmer, lang) || (e?.busy ? M.busy : M.net);
   }
+  if (!reply) reply = narrate(pre.data, farmer, lang) || (/429|5\d\d|timeout/i.test(debug) ? M.busy : M.net);
 
   reply = stripMarkdown(reply) || narrate(pre.data, farmer, lang) || M.none;
   if (pending && !/हाँ या ना|yes or no/i.test(reply)) reply += lang === 'en' ? ' Shall I confirm? Yes or no?' : ' क्या मैं पक्का कर दूँ? हाँ या ना?';
@@ -182,5 +206,5 @@ export async function POST(req) {
   if (s && farmerId) {
     s.from('messages').insert([{ farmer_id: farmerId, role: 'user', text: message }, { farmer_id: farmerId, role: 'assistant', text: reply }]).then(() => {}, () => {});
   }
-  return Response.json({ reply, cards: cards.slice(0, 1), pending, ms: Date.now() - t0 });
+  return Response.json({ reply, cards: cards.slice(0, 1), pending, ms: Date.now() - t0, debug: debug || undefined });
 }
