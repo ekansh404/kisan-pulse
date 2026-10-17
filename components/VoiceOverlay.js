@@ -6,6 +6,9 @@ import Icon from './Icon';
 import { listen, speak, stopListening, stopSpeaking, submitTyped, yesNo, sttSupported } from '@/lib/voice';
 import { t } from '@/lib/i18n';
 
+// Shown under the orb once the mic has gone idle after hearing silence.
+const HINT = { hi: 'माइक दबाकर फिर बोलिए', en: 'Tap the mic to speak again' };
+
 export default function VoiceOverlay({ open, onClose, farmer, lang = 'hi', firstQuestion }) {
   const L = t(lang);
   const [state, setState] = useState('idle'); // idle | listening | thinking | speaking
@@ -14,15 +17,18 @@ export default function VoiceOverlay({ open, onClose, farmer, lang = 'hi', first
   const [card, setCard] = useState(null);
   const [pending, setPending] = useState(null);
   const [typed, setTyped] = useState('');
+  const [hint, setHint] = useState('');
   const history = useRef([]);
   const alive = useRef(false);
   const pendingRef = useRef(null);
+  const turnBusy = useRef(false); // true while a listen() cycle is starting/running, so rapid orb taps don't start a second one
   pendingRef.current = pending;
 
   useEffect(() => {
     if (!open) return;
     alive.current = true;
-    setUserCap(''); setCard(null); setPending(null);
+    turnBusy.current = false;
+    setUserCap(''); setCard(null); setPending(null); setHint('');
     setAiCap(sttSupported() ? '' : L.noMic);
     if (firstQuestion) { setUserCap(firstQuestion); handleText(firstQuestion); }
     else turn({ userTapped: true });
@@ -39,12 +45,15 @@ export default function VoiceOverlay({ open, onClose, farmer, lang = 'hi', first
 
   // One listening turn. userTapped=true means the farmer pressed the mic, so we retry once if we heard nothing.
   async function turn({ userTapped = false, retried = false } = {}) {
-    if (!alive.current) return;
+    if (!alive.current || turnBusy.current) return; // already starting/running a listen() cycle
+    turnBusy.current = true;
     await new Promise((r) => setTimeout(r, 250)); // let the speaker go quiet before the mic opens
-    if (!alive.current) return;
+    if (!alive.current) { turnBusy.current = false; return; }
     setState('listening');
+    setHint('');
     setUserCap('');
     const r = await listen({ lang, onInterim: setUserCap });
+    turnBusy.current = false;
     if (!alive.current) return;
     if (r.error === 'not-allowed') { setState('idle'); setAiCap(L.noMic); return; }
     if (!r.text) {
@@ -53,7 +62,8 @@ export default function VoiceOverlay({ open, onClose, farmer, lang = 'hi', first
         await say(lang === 'en' ? "Sorry, I couldn't hear you. Please speak again." : 'माफ़ कीजिए, मैं आपको सुन नहीं पाई। कृपया दोबारा बोलिए।');
         return turn({ userTapped: true, retried: true });
       }
-      return; // stay idle, farmer taps the orb to talk again
+      setHint(HINT[lang] || HINT.hi); // stay idle, farmer taps the orb to talk again
+      return;
     }
     setUserCap(r.text);
     await handleText(r.text);
@@ -71,6 +81,7 @@ export default function VoiceOverlay({ open, onClose, farmer, lang = 'hi', first
     }
     // 2) Ask the brain
     setState('thinking');
+    setHint('');
     setCard(null);
     try {
       const res = await fetch('/api/chat', {
@@ -148,6 +159,9 @@ export default function VoiceOverlay({ open, onClose, farmer, lang = 'hi', first
         <button className={`orb ${state}`} onClick={orbTap} aria-label={status}>
           <Icon name={state === 'speaking' ? 'spk' : 'mic'} />
         </button>
+        {state === 'idle' && hint && !pending && (
+          <p className="mut" style={{ textAlign: 'center', fontSize: 14 }}>{hint}</p>
+        )}
         {card && <MiniCard card={card} lang={lang} />}
         {pending && (
           <div className="vo-confirm">
