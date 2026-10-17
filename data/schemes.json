@@ -1,0 +1,88 @@
+[
+  {
+    "id": "pm-kisan",
+    "name": "PM-KISAN Samman Nidhi",
+    "name_hi": "पीएम किसान सम्मान निधि",
+    "benefit": "₹6,000 per year in 3 instalments of ₹2,000, sent directly to the bank account",
+    "benefit_hi": "साल में ₹6,000, ₹2,000 की 3 किस्तों में सीधे बैंक खाते में",
+    "rules": { "min_land_acres": 0.01 },
+    "exclusions": "Income-tax payers, government employees (except Group D/MTS), pensioners with ₹10,000+/month, constitutional post holders, doctors, engineers, lawyers, CAs, architects",
+    "exclusions_hi": "आयकर देने वाले, सरकारी कर्मचारी (ग्रुप D छोड़कर), ₹10,000+ पेंशन वाले, डॉक्टर, इंजीनियर, वकील, CA इसमें नहीं आते",
+    "documents": ["Aadhaar", "Aadhaar-linked bank account", "Land record (Khatauni)"],
+    "how": "Register on pmkisan.gov.in or at a CSC centre. e-KYC is compulsory.",
+    "how_hi": "pmkisan.gov.in या जन सेवा केंद्र (CSC) पर पंजीकरण करें। e-KYC ज़रूरी है।",
+    "source": "https://pmkisan.gov.in"
+  },
+  {
+    "id": "pmfby",
+    "name": "PM Fasal Bima Yojana (crop insurance)",
+    "name_hi": "प्रधानमंत्री फसल बीमा योजना",
+    "benefit": "Crop insurance. Farmer pays only 2% premium for Kharif, 1.5% for Rabi, 5% for commercial/horticulture crops",
+    "benefit_hi": "फसल बीमा। किसान को सिर्फ़ 2% (खरीफ़), 1.5% (रबी), 5% (बागवानी/व्यावसायिक) प्रीमियम देना होता है",
+    "rules": { "min_land_acres": 0.01, "needs_crop": true },
+    "documents": ["Aadhaar", "Bank passbook", "Land record", "Sowing certificate"],
+    "how": "Enrol through your bank, CSC or pmfby.gov.in before the season cut-off date. Report crop loss within 72 hours on helpline 14447.",
+    "how_hi": "बैंक, CSC या pmfby.gov.in से सीज़न की आख़िरी तारीख़ से पहले जुड़ें। नुकसान होने पर 72 घंटे में 14447 पर बताएँ।",
+    "source": "https://pmfby.gov.in"
+  },
+  {
+    "id": "kcc",
+    "name": "Kisan Credit Card (KCC)",
+    "name_hi": "किसान क्रेडिट कार्ड",
+    "benefit": "Low-interest crop loan: 7% interest, effectively 4% if repaid on time (interest subvention on loans up to ₹3 lakh). Collateral-free up to ₹2 lakh.",
+    "benefit_hi": "कम ब्याज पर खेती का कर्ज़: 7% ब्याज, समय पर चुकाने पर सिर्फ़ 4%। ₹2 लाख तक बिना गारंटी।",
+    "rules": { "min_land_acres": 0.01 },
+    "documents": ["Aadhaar", "Land record", "Passport photo", "Bank account"],
+    "how": "Apply at any bank branch or through the PM-KISAN KCC form.",
+    "how_hi": "किसी भी बैंक शाखा में या पीएम किसान के KCC फ़ॉर्म से आवेदन करें।",
+    "source": "https://www.myscheme.gov.in/schemes/kcc"
+  },
+  {
+    "id": "soil-health-card",
+    "name": "Soil Health Card",
+    "name_hi": "मृदा स्वास्थ्य कार्ड",
+    "benefit": "Free soil test with fertiliser recommendation for your field",
+    "benefit_hi": "मुफ़्त मिट्टी जाँच और आपके खेत के हिसाब से खाद की सलाह",
+    "rules": { "min_land_acres": 0.01 },
+    "documents": ["Aadhaar", "Field details"],
+    "how": "Contact the block agriculture office or Krishi Vigyan Kendra (KVK).",
+    "how_hi": "ब्लॉक कृषि कार्यालय या कृषि विज्ञान केंद्र (KVK) से संपर्क करें।",
+    "source": "https://soilhealth.dac.gov.in"
+  },
+  {
+    "id": "pmksy-drip",
+    "name": "PMKSY Per Drop More Crop (drip / sprinkler)",
+    "name_hi": "प्रति बूंद अधिक फसल (ड्रिप / स्प्रिंकलर)",
+    "benefit": "Subsidy on drip/sprinkler irrigation: 55% for small & marginal farmers, 45% for others (states may add more)",
+    "benefit_hi": "ड्रिप/स्प्रिंकलर पर सब्सिडी: छोटे और सीमांत किसानों को 55%, बाकी को 45%",
+    "rules": { "min_land_acres": 0.01 },
+    "documents": ["Aadhaar", "Land record", "Bank account"],
+    "how": "Apply on your state agriculture / horticulture department portal.",
+    "how_hi": "अपने राज्य के कृषि/उद्यान विभाग के पोर्टल पर आवेदन करें।",
+    "source": "https://pmksy.gov.in"
+  },
+  {
+    "id": "pm-kusum",
+    "name": "PM-KUSUM (solar pump)",
+    "name_hi": "पीएम कुसुम (सोलर पंप)",
+    "benefit": "Subsidy on standalone solar irrigation pumps (Centre 30% + State share; farmer pays the rest, bank loan available)",
+    "benefit_hi": "सोलर सिंचाई पंप पर सब्सिडी (केंद्र 30% + राज्य का हिस्सा, बाकी पर बैंक लोन)",
+    "rules": { "min_land_acres": 0.01 },
+    "documents": ["Aadhaar", "Land record", "Bank account"],
+    "how": "Apply on your state's PM-KUSUM / agriculture portal when applications open.",
+    "how_hi": "राज्य के पीएम कुसुम / कृषि पोर्टल पर आवेदन खुलने पर आवेदन करें।",
+    "source": "https://pmkusum.mnre.gov.in"
+  },
+  {
+    "id": "pm-kmy",
+    "name": "PM Kisan Maandhan Yojana (pension)",
+    "name_hi": "पीएम किसान मानधन योजना (पेंशन)",
+    "benefit": "₹3,000/month pension after age 60. Monthly contribution ₹55–200 (matched by Government).",
+    "benefit_hi": "60 साल के बाद ₹3,000 महीना पेंशन। ₹55–200 महीना जमा, उतना ही सरकार डालती है।",
+    "rules": { "max_land_acres": 4.94, "age_min": 18, "age_max": 40 },
+    "documents": ["Aadhaar", "Bank account"],
+    "how": "Register at a CSC centre.",
+    "how_hi": "जन सेवा केंद्र (CSC) पर पंजीकरण करें।",
+    "source": "https://maandhan.in"
+  }
+]
