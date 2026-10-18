@@ -32,7 +32,7 @@ const withTimeout = (p, ms, fallback) => Promise.race([p, new Promise((r) => set
 function slim(kind, d) {
   if (!d || d.error) return d;
   if (kind === 'weather') return { place: d.place, now: d.current, next3days: d.days?.slice(0, 3).map(({ date, max, min, rain_mm, rain_prob, text }) => ({ date, max, min, rain_mm, rain_prob, text })), alerts: d.alerts?.map((a) => a.title + ': ' + a.advice) };
-  if (kind === 'mandi') return d.found ? { crop: d.commodity, date: d.date, unit: '₹/quintal', average: d.average_modal, best: d.best, others: d.markets?.slice(1, 4).map((x) => ({ market: x.market, modal: x.modal })), cached: !!d.cached } : { found: false, note: d.note || d.error };
+  if (kind === 'mandi') return d.found ? { crop: d.commodity, date: d.date, not_today: !!d.recent, unit: '₹/quintal', average: d.average_modal, best: d.best, others: d.markets?.slice(1, 4).map((x) => ({ market: x.market, modal: x.modal })), cached: !!d.cached } : { found: false, note: d.note || d.error };
   if (kind === 'schemes') return d.schemes?.filter((s) => s.status !== 'not_eligible').map((s) => ({ name: s.name, status: s.status, benefit: s.benefit, needs_check: s.why, documents: s.documents, how_to_apply: s.how, official_site: s.source }));
   return d;
 }

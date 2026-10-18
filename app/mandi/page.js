@@ -29,10 +29,11 @@ export default function Mandi() {
 
   const sayIt = () => {
     if (!data?.found) return speak(en ? 'Price not available right now.' : 'अभी भाव उपलब्ध नहीं है।', lang);
+    if (!data.best) return;
     const b = data.best;
     speak(en
-      ? `${data.commodity}: best price today ${b.modal} rupees per quintal at ${b.market}. Average ${data.average_modal}.`
-      : `${label(crop)} का आज का सबसे अच्छा भाव ${b.market} मंडी में ${b.modal} रुपये प्रति क्विंटल है। औसत भाव ${data.average_modal} रुपये है।`, lang);
+      ? `${data.commodity}: best price ${data.recent ? 'on ' + data.date : 'today'} ${b.modal} rupees per quintal at ${b.market}. Average ${data.average_modal}.`
+      : `${label(crop)} का ${data.recent ? data.date + ' का' : 'आज का'} सबसे अच्छा भाव ${b.market} मंडी में ${b.modal} रुपये प्रति क्विंटल है। औसत भाव ${data.average_modal} रुपये है।`, lang);
   };
 
   return (
@@ -50,9 +51,10 @@ export default function Mandi() {
         {!loading && data?.found && (
           <>
             <div className="card">
-              <div className="row sb"><p className="h3">{en ? 'Best price today' : 'आज का सबसे अच्छा भाव'}</p><span className="chip c-ok">{data.scope === 'district' ? (en ? 'Your district' : 'आपका ज़िला') : (en ? 'Your state' : 'आपका राज्य')}</span></div>
+              <div className="row sb"><p className="h3">{data.recent ? (en ? 'Latest best price' : 'सबसे ताज़ा अच्छा भाव') : (en ? 'Best price today' : 'आज का सबसे अच्छा भाव')}</p><span className="chip c-ok">{data.scope === 'district' ? (en ? 'Your district' : 'आपका ज़िला') : (en ? 'Your state' : 'आपका राज्य')}</span></div>
               <p className="h1">₹{data.best.modal}</p>
               <p className="mut">{data.best.market}, {data.best.district} · {data.best.variety} · {data.date}</p>
+              {data.recent && <p className="tiny">{en ? `No mandi reported this crop today, showing the latest price (${data.date}).` : `आज मंडी से भाव नहीं आया, इसलिए ${data.date} का ताज़ा भाव दिखा रहे हैं।`}</p>}
             </div>
             <div className="card">
               <div className="row sb"><p className="h3">{en ? 'Markets' : 'मंडियाँ'}</p><span className="mut">min · modal · max</span></div>
@@ -68,7 +70,7 @@ export default function Mandi() {
         )}
 
         {!loading && data && !data.found && (
-          <div className="card"><p className="p">{en ? 'No mandi has reported this crop today in your area.' : 'आज आपके इलाके की किसी मंडी ने यह फसल दर्ज नहीं की।'}</p>{data.error && <p className="tiny">{data.error}</p>}</div>
+          <div className="card"><p className="p">{data.api_down ? (en ? 'The government mandi price service is not responding right now. Please try again in a little while.' : 'सरकारी मंडी भाव सेवा अभी जवाब नहीं दे रही। थोड़ी देर में फिर देखिए।') : en ? 'No mandi in your state has reported this crop in the last few days. Try another crop.' : ('पिछले कुछ दिनों में आपके राज्य की किसी मंडी ने यह फसल दर्ज नहीं की। दूसरी फसल देखिए।')}</p>{data.error && <p className="tiny">{data.error}</p>}</div>
         )}
       </main>
       <BottomNav lang={lang} />
