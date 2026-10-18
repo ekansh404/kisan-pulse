@@ -8,7 +8,7 @@ import VoiceOverlay from '@/components/VoiceOverlay';
 import Icon from '@/components/Icon';
 import useFarmer from '@/components/useFarmer';
 import { t } from '@/lib/i18n';
-import { speak } from '@/lib/voice';
+import { speak, isVoiceMuted, setVoiceMuted, onSpeakingChange } from '@/lib/voice';
 
 export default function Home() {
   const router = useRouter();
@@ -18,6 +18,17 @@ export default function Home() {
   const [open, setOpen] = useState(false);
   const [firstQ, setFirstQ] = useState(null);
   const greeted = useRef(false);
+  const [muted, setMuted] = useState(false);
+  const [talking, setTalking] = useState(false);
+  useEffect(() => {
+    setMuted(isVoiceMuted());
+    const off = onSpeakingChange(setTalking);
+    const onMute = (e) => setMuted(!!e.detail);
+    window.addEventListener('kp-voice-muted', onMute);
+    return () => { off(); window.removeEventListener('kp-voice-muted', onMute); };
+  }, []);
+  const toggleMute = () => setVoiceMuted(!isVoiceMuted());
+  const listenNow = () => { if (isVoiceMuted()) setVoiceMuted(false); speak(greetingText(), lang); };
   const L = t(lang);
 
   // Not registered on this phone -> voice onboarding
@@ -94,8 +105,14 @@ export default function Home() {
       <Header
         title={L.app}
         sub={L.tagline}
-        onSpeak={() => speak(greetingText(), lang)}
-        right={<button className="hb" onClick={() => setLang(lang === 'hi' ? 'en' : 'hi')} aria-label="Language">{lang === 'hi' ? 'EN' : 'हिं'}</button>}
+        right={
+          <>
+            <button className="hb" onClick={() => setLang(lang === 'hi' ? 'en' : 'hi')} aria-label="Language">{lang === 'hi' ? 'EN' : 'हिं'}</button>
+            <button className={`hb ${talking && !muted ? 'live' : ''} ${muted ? 'muted' : ''}`} onClick={toggleMute} aria-pressed={muted} aria-label={muted ? (lang === 'en' ? 'Unmute voice' : 'आवाज़ चालू करें') : (lang === 'en' ? 'Mute voice' : 'आवाज़ बंद करें')}>
+              <Icon name={muted ? 'spkOff' : 'spk'} />
+            </button>
+          </>
+        }
       />
       <main className="page home">
         <section className="hero rise">
@@ -125,7 +142,7 @@ export default function Home() {
               ))}
             </div>
           )}
-          <button className="listen-chip" onClick={() => speak(greetingText(), lang)}>
+          <button className="listen-chip" onClick={listenNow}>
             <Icon name="spk" />{lang === 'en' ? 'Listen to today' : 'आज की जानकारी सुनें'}
           </button>
         </section>
