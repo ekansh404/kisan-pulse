@@ -291,6 +291,34 @@ export default function Onboarding() {
     else stopListening();
   }
 
+  // Reviewers / judges: skip onboarding with a ready demo profile. Profile is sample data,
+  // but everything after it (weather, mandi, schemes, AI answers) is fetched live for Lucknow.
+  const [guestBusy, setGuestBusy] = useState(false);
+  async function continueAsGuest() {
+    if (guestBusy) return;
+    setGuestBusy(true);
+    const profile = {
+      name: 'देव सिंह', lang: 'hi', village: 'Lucknow', district: 'Lucknow', state: 'Uttar Pradesh',
+      lat: 26.8467, lon: 80.9462, land_value: 2, land_unit: 'acre', land_acres: 2,
+      crops: ['wheat', 'potato', 'mustard'], farmer_id_sim: 'SIM-UP-GUEST01',
+    };
+    let farmer = { id: null, phone: '+919000000001', ...profile };
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 6000);
+      const r = await fetch('/api/farmer', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: ctrl.signal,
+        body: JSON.stringify({ action: 'register', phone: '9000000001', proof: { demo: DEMO_OTP || '1234' }, profile }),
+      }).then((x) => x.json());
+      clearTimeout(t);
+      if (r?.ok && r.farmer) farmer = r.farmer; // saved guest row -> bookings work too
+    } catch {}
+    saveLang('hi');
+    setFarmer({ ...farmer, lang: 'hi', guest: true });
+    prefetchWeather(profile.lat, profile.lon, 'hi');
+    goHome('');
+  }
+
   const T = S[langRef.current];
 
   if (!started) {
@@ -303,6 +331,10 @@ export default function Onboarding() {
           <p className="p" style={{ color: 'var(--mut)', textAlign: 'center' }}>बोलकर पंजीकरण करें · Register by voice</p>
           <button className="orb" onClick={run} aria-label={T.start}><Icon name="mic" /></button>
           <p className="h2" style={{ color: 'var(--earth)' }}>{T.start} · Start</p>
+          <button className="btn guest-btn" onClick={continueAsGuest} disabled={guestBusy}>
+            {guestBusy ? 'खुल रहा है… Opening…' : (<>Continue as Guest<small>अतिथि के रूप में जारी रखें</small></>)}
+          </button>
+          <button className="guest-skip" onClick={continueAsGuest} disabled={guestBusy}>पंजीकरण छोड़ें · Skip onboarding (demo: देव सिंह, Lucknow, 2 acre)</button>
         </div>
         <div id="recaptcha" />
       </main>
