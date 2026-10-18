@@ -92,6 +92,8 @@ DECIDING:
 
 ACTIONS (tractor, fertiliser/seed order, labour, selling crop): call propose_action (it does not book). Then say who, what and price in one sentence and end with "${lang === 'en' ? 'Shall I confirm? Yes or no?' : 'क्या मैं पक्का कर दूँ? हाँ या ना?'}". Never say it is booked yourself.
 
+PERSONA: You are Kisan Pulse, a farming assistant made by team Git-Set-Go. You only help with farming: weather and rain, mandi prices, government schemes, soil and fertiliser, crop care, and booking tractor, labour, seed or fertiliser. For questions about yourself or the app, answer in one or two short accurate sentences. For anything outside farming (films, cricket, politics, jokes, general knowledge), say politely in one sentence that you only help with farming, then ask a follow-up that brings them back, e.g. whether to tell today's weather or their crop's mandi price. Never pretend you did something you cannot do.
+
 HONESTY: Farmer ID / land verification, insurance claims, loans and payments are demo-only in this prototype.`;
 }
 
@@ -135,6 +137,59 @@ function normalizeHistory(history = []) {
   return out.slice(-6).length && out.slice(-6)[0].role !== 'user' ? out.slice(-5) : out.slice(-6);
 }
 
+// ---- Fixed personality for small talk: instant, no AI call, always the same accurate answer ----
+// Only short messages with no farming topic in them land here. Each reply ends with a question
+// that brings the farmer back to what the app can do.
+const SMALL = [
+  ['myname', /(मेरा|mera|my)\s*(नाम|naam|name)/i],
+  ['maker', /किसने\s*बनाया|किसने\s*बनाई|who\s*(made|built|created)|kisne\s*banaya/i],
+  ['name', /नाम|naam|your\s*name|who\s*are\s*you|कौन\s*हो|कौन\s*हैं|कौन\s*है\s*आप|kaun\s*ho|kaun\s*hai/i],
+  ['cando', /क्या\s*(क्या|-क्या)?\s*कर\s*सकती|क्या\s*कर\s*सकते|किस\s*(काम|चीज़|चीज)|क्या\s*मदद|कैसे\s*मदद|क्या\s*पूछ|what\s*can\s*you|how\s*can\s*you\s*help|kya\s*kar\s*sakti|kya\s*kya|help$|मदद$/i],
+  ['how', /कैसी\s*हो|कैसे\s*हो|कैसी\s*हैं|कैसे\s*हैं|क्या\s*हाल|how\s*are\s*you|kaisi\s*ho|kaise\s*ho|kya\s*haal/i],
+  ['thanks', /धन्यवाद|शुक्रिया|थैंक|thank|dhanyavaad|dhanyavad|shukriya/i],
+  ['bye', /अलविदा|बाय|फिर\s*मिलेंगे|बाद\s*में\s*बात|\bbye\b|good\s*night|शुभ\s*रात्रि/i],
+  ['hello', /^(hello|hi|hey|helo|hlo|हेलो|हैलो|हलो|हाय|नमस्ते|नमस्कार|प्रणाम|राम\s*राम|जय\s*राम\s*जी\s*की|namaste|namaskar|ram\s*ram|good\s*morning|सुप्रभात)/i],
+];
+
+const CROP_HI = { wheat: 'गेहूं', paddy: 'धान', rice: 'चावल', sugarcane: 'गन्ने', potato: 'आलू', mustard: 'सरसों', maize: 'मक्का', chana: 'चने', arhar: 'अरहर', moong: 'मूंग', urad: 'उड़द', masoor: 'मसूर', peas: 'मटर', onion: 'प्याज', tomato: 'टमाटर', garlic: 'लहसुन', bajra: 'बाजरे', barley: 'जौ', mentha: 'मेंथा', banana: 'केले', mango: 'आम', groundnut: 'मूंगफली', soybean: 'सोयाबीन', cotton: 'कपास', cauliflower: 'गोभी' };
+const CROP_EN = { paddy: 'paddy', chana: 'gram', arhar: 'arhar', vegetables: '' };
+
+function smallTalk(message, f = {}, lang = 'hi') {
+  const m = message.trim().replace(/[।?!.,]+/g, ' ').trim();
+  if (!m || m.split(/\s+/).length > 8) return null;
+  if (Object.values(RX).some((r) => r.test(m))) return null; // has a farming topic -> real answer
+  if (CROP_KEYS.some((k) => m.toLowerCase().includes(k.toLowerCase()))) return null;
+  const kind = SMALL.find(([, r]) => r.test(m))?.[0];
+  if (!kind) return null;
+  const hi = lang !== 'en';
+  const name = f.name ? (hi ? `${f.name} जी` : `${f.name} ji`) : '';
+  const c0 = f.crops?.[0];
+  const crop = c0 ? (hi ? CROP_HI[c0] ?? (/[a-z]/i.test(c0) ? '' : c0) : CROP_EN[c0] ?? (/[a-z]/i.test(c0) ? c0 : '')) : '';
+  const nudge = hi
+    ? crop ? `आज ${crop} का मंडी भाव बताऊँ, या मौसम का हाल?` : 'आज मौसम का हाल बताऊँ, या मंडी भाव?'
+    : crop ? `Shall I tell you today's ${crop} mandi price, or the weather?` : "Shall I tell you today's weather, or mandi prices?";
+  const R = hi ? {
+    hello: `नमस्कार${name ? ' ' + name : ''}! मैं आपकी किस प्रकार सहायता कर सकती हूँ? ${nudge}`,
+    name: `मेरा नाम किसान पल्स है। मैं आपकी खेती की सहायक हूँ। ${nudge}`,
+    myname: f.name ? `आपका नाम ${f.name} जी है। ${nudge}` : `आपका नाम अभी दर्ज नहीं है। ${nudge}`,
+    maker: `मुझे टीम गिट-सेट-गो ने किसानों की मदद के लिए बनाया है। ${nudge}`,
+    cando: `मैं आपको आज का मौसम और बारिश, मंडी भाव, सरकारी योजनाएँ, मिट्टी और खाद की सलाह बता सकती हूँ। ट्रैक्टर, मज़दूर या खाद की बुकिंग भी करवा सकती हूँ। ${nudge}`,
+    how: `मैं ठीक हूँ, पूछने के लिए धन्यवाद${name ? ' ' + name : ''}। ${nudge}`,
+    thanks: `आपका स्वागत है${name ? ' ' + name : ''}। कुछ और जानना हो तो बताइए। ${nudge}`,
+    bye: `ठीक है${name ? ' ' + name : ''}, अपना ध्यान रखिए। जब भी ज़रूरत हो, बड़ा माइक दबाइए।`,
+  } : {
+    hello: `Namaskar${name ? ' ' + name : ''}! How may I help you? ${nudge}`,
+    name: `My name is Kisan Pulse. I am your farming assistant. ${nudge}`,
+    myname: f.name ? `Your name is ${f.name} ji. ${nudge}` : `Your name is not saved yet. ${nudge}`,
+    maker: `I was made by team Git-Set-Go to help farmers. ${nudge}`,
+    cando: `I can tell you today's weather and rain, mandi prices, government schemes, and soil and fertiliser advice. I can also book a tractor, labour or fertiliser for you. ${nudge}`,
+    how: `I am fine, thank you for asking${name ? ' ' + name : ''}. ${nudge}`,
+    thanks: `You are welcome${name ? ' ' + name : ''}. Tell me if you need anything else. ${nudge}`,
+    bye: `Okay${name ? ' ' + name : ''}, take care. Tap the big mic whenever you need me.`,
+  };
+  return R[kind];
+}
+
 const msgFor = (lang) => ({
   busy: lang === 'en' ? 'The server is busy right now. Please ask again in a moment.' : 'सर्वर अभी व्यस्त है। कृपया थोड़ी देर में फिर पूछिए।',
   net: lang === 'en' ? 'Sorry, there is a problem with the internet. Please ask again.' : 'माफ़ कीजिए, इंटरनेट में दिक्कत है। कृपया दोबारा पूछिए।',
@@ -147,6 +202,13 @@ export async function POST(req) {
   const { farmerId, farmer: clientFarmer = {}, lang = 'hi', message = '', history = [] } = await req.json().catch(() => ({}));
   const M = msgFor(lang);
   if (!message.trim()) return Response.json({ reply: '', cards: [], pending: null });
+
+  const quick = smallTalk(message, clientFarmer, lang);
+  if (quick) {
+    const s0 = db();
+    if (s0 && farmerId) s0.from('messages').insert([{ farmer_id: farmerId, role: 'user', text: message }, { farmer_id: farmerId, role: 'assistant', text: quick }]).then(() => {}, () => {});
+    return Response.json({ reply: quick, cards: [], pending: null, ms: Date.now() - t0, debug: { path: 'persona' } });
+  }
   if (!geminiReady()) return Response.json({ reply: M.key, cards: [], pending: null });
 
   // Profile from DB (fresh) — in parallel with nothing else blocking

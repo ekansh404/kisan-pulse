@@ -28,7 +28,7 @@ export default function Home() {
     return () => { off(); window.removeEventListener('kp-voice-muted', onMute); };
   }, []);
   const toggleMute = () => setVoiceMuted(!isVoiceMuted());
-  const listenNow = () => { if (isVoiceMuted()) setVoiceMuted(false); speak(greetingText(), lang); };
+  const listenNow = () => { if (isVoiceMuted()) setVoiceMuted(false); speak(weatherBriefing(), lang); };
   const L = t(lang);
 
   // Not registered on this phone -> voice onboarding
@@ -54,47 +54,62 @@ export default function Home() {
       .catch(() => setWeatherError(true));
   }, [farmer, lang]);
 
-  // What the assistant says when home opens. Right after onboarding it starts with the welcome.
-  const greetingText = (intro = '') => {
+  // What the assistant says when home opens: ONE fixed line. Same text every time, so its audio is
+  // saved on the phone after the first play (no voice API call again) and no weather call is waited for.
+  const staticGreeting = (intro = '') => {
     if (!farmer) return '';
-    const hi = lang !== 'en';
-    const name = farmer.name;
-    const crop = farmer.crops?.[0];
-    const a = weather?.alerts || [];
-    const parts = [];
-    if (intro === 'new') parts.push(hi ? `बधाई हो ${name} जी, आपका पंजीकरण सफल हो गया!` : `Congratulations ${name} ji, you are registered!`);
-    else if (intro === 'back') parts.push(hi ? `${name} जी, आपका दोबारा स्वागत है!` : `Welcome back, ${name} ji!`);
-    else parts.push(L.greet(name) + (hi ? '।' : '.'));
-    if (weather?.current) {
-      const tmr = weather.days?.[1];
-      parts.push(hi
-        ? `${farmer.district || farmer.village} में अभी ${weather.current.temp} डिग्री है, ${weather.current.text}।${tmr ? ` कल ${tmr.max} डिग्री तक, ${tmr.text}।` : ''}`
-        : `In ${farmer.district || farmer.village} it is ${weather.current.temp} degrees, ${weather.current.text}.${tmr ? ` Tomorrow up to ${tmr.max} degrees, ${tmr.text}.` : ''}`);
+    const n = farmer.name;
+    if (lang === 'en') {
+      const ask = 'How may I help you?';
+      if (intro === 'new') return `Congratulations ${n} ji, you are registered! ${ask}`;
+      if (intro === 'back') return `Welcome back, ${n} ji! ${ask}`;
+      return `Namaskar ${n} ji, ${ask.toLowerCase()}`;
     }
-    if (a.length) parts.push((hi ? 'ध्यान दीजिए: ' : 'Please note: ') + a.slice(0, 2).map((x) => `${x.title}। ${x.advice}`).join(' '));
-    else if (weather) parts.push(hi ? `आज ${crop ? 'आपकी फसल के लिए ' : ''}मौसम से कोई ख़तरा नहीं है।` : 'No weather risk for your farm today.');
-    parts.push(hi
-      ? `आप मुझसे ${crop ? 'अपनी फसल का ' : ''}मंडी भाव, मौसम, सरकारी योजना या ट्रैक्टर के बारे में पूछ सकते हैं। बस बड़ा माइक दबाइए।`
-      : 'Ask me about mandi prices, weather, government schemes or a tractor. Just tap the big mic.');
+    const ask = 'मैं आपकी किस प्रकार सहायता कर सकती हूँ?';
+    if (intro === 'new') return `बधाई हो ${n} जी, आपका पंजीकरण सफल हो गया! ${ask}`;
+    if (intro === 'back') return `${n} जी, आपका दोबारा स्वागत है! ${ask}`;
+    return `नमस्कार ${n} जी, ${ask}`;
+  };
+
+  // "आज की जानकारी सुनें": today's and tomorrow's weather and rain, plus any weather alerts. Numbers only from the weather API.
+  const weatherBriefing = () => {
+    const hi = lang !== 'en';
+    if (!weather?.current) return hi ? 'माफ़ कीजिए, अभी मौसम की जानकारी नहीं मिल पाई। थोड़ी देर में फिर दबाइए।' : 'Sorry, the weather is not available right now. Please try again in a moment.';
+    const place = farmer.district || farmer.village || '';
+    const [d0, d1] = weather.days || [];
+    const rain = (d) => {
+      if (!d) return '';
+      const mm = Number(d.rain_mm) || 0;
+      const p = d.rain_prob != null ? Number(d.rain_prob) : null;
+      if (mm >= 1) return hi ? `लगभग ${Math.round(mm)} मिलीमीटर बारिश हो सकती है${p != null ? `, संभावना ${p} प्रतिशत` : ''}` : `about ${Math.round(mm)} mm of rain is likely${p != null ? `, ${p} percent chance` : ''}`;
+      if (p != null && p >= 30) return hi ? `बारिश की संभावना ${p} प्रतिशत है` : `${p} percent chance of rain`;
+      return hi ? 'बारिश की उम्मीद नहीं है' : 'no rain expected';
+    };
+    const parts = [];
+    parts.push(hi ? `${place} में अभी ${weather.current.temp} डिग्री है, ${weather.current.text}।` : `In ${place} it is ${weather.current.temp} degrees now, ${weather.current.text}.`);
+    if (d0) parts.push(hi ? `आज ${d0.max} डिग्री तक जाएगा, ${rain(d0)}।` : `Today up to ${d0.max} degrees, ${rain(d0)}.`);
+    if (d1) parts.push(hi ? `कल ${d1.max} डिग्री तक जाएगा, ${rain(d1)}।` : `Tomorrow up to ${d1.max} degrees, ${rain(d1)}.`);
+    const a = weather.alerts || [];
+    if (a.length) parts.push((hi ? 'मौसम चेतावनी: ' : 'Weather alert: ') + a.slice(0, 2).map((x) => `${x.title}। ${x.advice}`).join(' '));
+    else parts.push(hi ? 'आज मौसम से फसल को कोई ख़तरा नहीं है।' : 'No weather risk for your crops today.');
     return parts.join(' ');
   };
 
-  // Speak as soon as home opens: right away if weather is ready, otherwise after at most 1.5 s without it.
+  // Speak the fixed line right away, once per app session (refreshing or coming back to home does not repeat it).
   useEffect(() => {
     if (!farmer || greeted.current) return;
+    greeted.current = true;
     let intro = '';
-    try { intro = sessionStorage.getItem('kp_intro') || ''; } catch {}
-    const go = () => {
-      if (greeted.current) return;
-      greeted.current = true;
-      try { sessionStorage.removeItem('kp_intro'); } catch {}
-      speak(greetingText(intro), lang).catch(() => {});
-    };
-    if (weather || weatherError) { go(); return; }
-    const t = setTimeout(go, 1500);
-    return () => clearTimeout(t);
+    let done = false;
+    try {
+      intro = sessionStorage.getItem('kp_intro') || '';
+      sessionStorage.removeItem('kp_intro');
+      done = !intro && sessionStorage.getItem('kp_greeted') === '1';
+      sessionStorage.setItem('kp_greeted', '1');
+    } catch {}
+    if (!done) speak(staticGreeting(intro), lang, { cache: true }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [farmer, weather, weatherError]);
+  }, [farmer]);
 
   if (!ready || !farmer) return null;
   const alerts = weather?.alerts || [];
