@@ -22,6 +22,7 @@ export default function Services() {
   const [list, setList] = useState(null);
   const [ask, setAsk] = useState(null); // partner awaiting confirm
   const [mine, setMine] = useState([]);
+  const [detail, setDetail] = useState(null); // booking shown in the details sheet
   const [toast, setToast] = useState('');
 
   useEffect(() => {
@@ -101,19 +102,114 @@ export default function Services() {
 
         {mine.length > 0 && (
           <div className="card">
-            <p className="h3">{en ? 'My requests' : 'मेरी बुकिंग / ऑर्डर'}</p>
-            {mine.slice(0, 6).map((r) => (
-              <div key={r.id} className="row sb">
-                <span className="p" style={{ fontSize: 15 }}>{(en ? r.partner?.name : r.partner?.name_hi || r.partner?.name) || r.type} · {r.payload?.need || r.payload?.crop || ''}</span>
-                <span className="chip c-ok">{en ? 'Confirmed' : 'पक्का'}</span>
-              </div>
-            ))}
+            <p className="h3">{en ? 'My bookings & orders' : 'मेरी बुकिंग / ऑर्डर'}</p>
+            {mine.slice(0, 8).map((r) => {
+              const meta = KIND[r.type] || KIND.book_machine;
+              const cancelled = r.status === 'cancelled';
+              return (
+                <button key={r.id} className="req-row" onClick={() => setDetail(r)} aria-label={en ? 'View details' : 'विवरण देखें'}>
+                  <span className="tic" style={{ background: meta.bg, color: meta.fg, width: 40, height: 40, borderRadius: 12 }}><Icon name={meta.icon} /></span>
+                  <span className="req-main">
+                    <b>{(en ? r.partner?.name : r.partner?.name_hi || r.partner?.name) || (en ? meta.en : meta.hi)}</b>
+                    <small>{en ? meta.en : meta.hi}{r.payload?.need ? ` · ${r.payload.need}` : r.payload?.crop ? ` · ${r.payload.crop}` : ''}</small>
+                  </span>
+                  <span className={`chip ${cancelled ? 'c-gr' : 'c-ok'}`}>{cancelled ? (en ? 'Cancelled' : 'रद्द') : (en ? 'Confirmed' : 'पक्का')}</span>
+                  <span className="req-more">{en ? 'Details' : 'विवरण'} ›</span>
+                </button>
+              );
+            })}
           </div>
         )}
         <p className="tiny">{en ? 'Demo partner listings · payments are simulated' : 'डेमो पार्टनर · भुगतान सिम्युलेटेड है'}</p>
       </main>
+      {detail && <RequestSheet r={detail} en={en} lang={lang} farmerId={farmer?.id} onClose={() => setDetail(null)} onChanged={(upd, msg) => { setDetail(null); setMine((m) => m.map((x) => (x.id === upd.id ? { ...x, ...upd } : x))); setToast(msg); speak(msg, lang); setTimeout(() => setToast(''), 3500); }} />}
       {toast && <div className="toast" role="status">{toast}</div>}
       <BottomNav lang={lang} />
     </>
+  );
+}
+
+const KIND = {
+  book_machine: { icon: 'tractor', hi: 'मशीन बुकिंग', en: 'Machine booking', bg: '#FBE3CF', fg: '#9A4A0F' },
+  order_input: { icon: 'flask', hi: 'खाद-बीज ऑर्डर', en: 'Agri store order', bg: '#DDEFD9', fg: '#2C6E2F' },
+  hire_labour: { icon: 'people', hi: 'मज़दूर माँग', en: 'Labour request', bg: '#F8DDE3', fg: '#8E2B47' },
+  sell_crop: { icon: 'store', hi: 'फसल बिक्री ऑफ़र', en: 'Crop sale offer', bg: '#FBEFC8', fg: '#7A5A00' },
+};
+
+// Bottom sheet with full booking details + cancel (with a second confirm step)
+function RequestSheet({ r, en, lang, farmerId, onClose, onChanged }) {
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const meta = KIND[r.type] || KIND.book_machine;
+  const p = r.partner || {};
+  const pay = r.payload || {};
+  const cancelled = r.status === 'cancelled';
+  const when = r.created_at ? new Date(r.created_at).toLocaleString(en ? 'en-IN' : 'hi-IN', { day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' }) : '';
+  const unit = UNIT[p.rate_unit]?.[en ? 1 : 0];
+  const rows = [
+    [en ? 'Partner' : 'पार्टनर', en ? p.name : p.name_hi || p.name],
+    [en ? 'Place' : 'जगह', [p.village, p.district].filter(Boolean).join(', ')],
+    [en ? 'What' : 'क्या', pay.need || p.details?.machine || p.details?.items?.slice(0, 3).join(', ')],
+    [en ? 'Crop' : 'फसल', pay.crop],
+    [en ? 'Quantity' : 'मात्रा', pay.quantity_quintal ? `${pay.quantity_quintal} ${en ? 'quintal' : 'क्विंटल'}` : null],
+    [en ? 'People' : 'लोग', pay.count],
+    [en ? 'When needed' : 'कब', pay.date],
+    [en ? 'Rate' : 'दर', p.rate ? `₹${p.rate}${unit ? ' / ' + unit : ''}` : null],
+    [en ? 'Booked on' : 'बुकिंग का समय', when],
+    [en ? 'Booking ID' : 'बुकिंग नंबर', String(r.id || '').slice(0, 8).toUpperCase()],
+  ].filter(([, v]) => v !== undefined && v !== null && v !== '');
+
+  async function cancel() {
+    setBusy(true); setErr('');
+    try {
+      const res = await fetch('/api/actions', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: r.id, farmerId, status: 'cancelled' }) });
+      const out = await res.json();
+      if (!out.ok) throw new Error(out.error);
+      onChanged({ ...r, status: 'cancelled' }, en ? `${meta.en} cancelled. ${p.name || ''} has been informed.` : `${meta.hi} रद्द कर दी गई। ${p.name_hi || p.name || ''} को सूचना दे दी गई है।`);
+    } catch {
+      setErr(en ? 'Could not cancel. Please try again.' : 'रद्द नहीं हो पाया, दोबारा कोशिश करें।');
+      setBusy(false);
+    }
+  }
+
+  const sayIt = () => speak(rows.map(([k, v]) => `${k}: ${v}`).join('। '), lang);
+
+  return (
+    <div className="sheet-wrap" role="dialog" aria-modal="true" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="sheet">
+        <span className="sheet-grip" aria-hidden="true" />
+        <div className="row sb">
+          <div className="row" style={{ gap: 10 }}>
+            <span className="tic" style={{ background: meta.bg, color: meta.fg, width: 44, height: 44, borderRadius: 14 }}><Icon name={meta.icon} /></span>
+            <div><p className="h3">{en ? meta.en : meta.hi}</p><span className={`chip ${cancelled ? 'c-gr' : 'c-ok'}`}>{cancelled ? (en ? 'Cancelled' : 'रद्द') : (en ? 'Confirmed' : 'पक्का')}</span></div>
+          </div>
+          <button className="hb" onClick={onClose} aria-label={en ? 'Close' : 'बंद करें'}><Icon name="x" /></button>
+        </div>
+        <dl className="kv">
+          {rows.map(([k, v]) => (<div key={k}><dt>{k}</dt><dd>{v}</dd></div>))}
+        </dl>
+        <div className="row">
+          {p.phone && <a className="btn sm alt" style={{ flex: 1 }} href={`tel:${p.phone}`}><Icon name="phone" />{en ? 'Call' : 'कॉल करें'}</a>}
+          <button className="btn sm alt" style={{ flex: 1 }} onClick={sayIt}><Icon name="spk" />{en ? 'Listen' : 'सुनें'}</button>
+        </div>
+        {!cancelled && !asking && (
+          <button className="btn sm danger" onClick={() => { setAsking(true); speak(en ? 'Do you want to cancel? Yes or no?' : 'क्या आप इसे रद्द करना चाहते हैं? हाँ या ना?', lang); }}>
+            <Icon name="x" />{en ? 'Cancel booking' : 'बुकिंग रद्द करें'}
+          </button>
+        )}
+        {asking && (
+          <div className="card" style={{ background: '#FFF6F4', borderColor: '#F3C9C2' }}>
+            <p className="p">{en ? 'Cancel this booking?' : 'क्या यह बुकिंग रद्द करनी है?'}</p>
+            <div className="row">
+              <button className="btn sm danger" style={{ flex: 1 }} disabled={busy} onClick={cancel}>{busy ? '…' : en ? 'Yes, cancel' : 'हाँ, रद्द करें'}</button>
+              <button className="btn sm alt" style={{ flex: 1 }} disabled={busy} onClick={() => setAsking(false)}>{en ? 'No' : 'नहीं'}</button>
+            </div>
+            {err && <p className="mut" style={{ color: 'var(--red)' }}>{err}</p>}
+          </div>
+        )}
+        <p className="tiny">{en ? 'Demo partner · payment is simulated' : 'डेमो पार्टनर · भुगतान सिम्युलेटेड है'}</p>
+      </div>
+    </div>
   );
 }
