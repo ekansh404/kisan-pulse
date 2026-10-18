@@ -9,7 +9,9 @@ import Icon from './Icon';
 import {
   listen, speak, speakAndListen, stopListening, cancelListening, isListening,
   stopSpeaking, submitTyped, yesNo, sttSupported, bargeInEnabled, setBargeIn, canTalkOver,
+  isVoiceMuted, setVoiceMuted as setGlobalVoiceMuted,
 } from '@/lib/voice';
+import AiLoader from './ui/ai-loader';
 
 const HISTORY_KEY = 'kp_history'; // keeps the conversation when the voice screen is closed and reopened
 const loadHistory = () => { try { return JSON.parse(sessionStorage.getItem(HISTORY_KEY) || '[]'); } catch { return []; } };
@@ -54,7 +56,7 @@ export default function VoiceOverlay({ open, onClose, farmer, lang = 'hi', first
   micMutedRef.current = micMuted;
   voiceMutedRef.current = voiceMuted;
 
-  useEffect(() => { setBarge(bargeInEnabled()); history.current = loadHistory(); }, []);
+  useEffect(() => { setBarge(bargeInEnabled()); history.current = loadHistory(); setVoiceMuted(isVoiceMuted()); }, []);
 
   // Keep the screen awake while talking; stop the mic and voice if the app goes to the background
   useEffect(() => {
@@ -217,6 +219,7 @@ export default function VoiceOverlay({ open, onClose, farmer, lang = 'hi', first
     const next = !voiceMuted;
     setVoiceMuted(next);
     voiceMutedRef.current = next;
+    setGlobalVoiceMuted(next); // same switch as the speaker button on home
     if (next) stopSpeaking();
   }
 
@@ -286,15 +289,19 @@ export default function VoiceOverlay({ open, onClose, farmer, lang = 'hi', first
       </div>
 
       <div className="vo-mid">
-        <button className={`orb ${state}`} onClick={orbTap} aria-label={status}>
-          {state === 'speaking' ? (
-            <span className="bars" aria-hidden="true"><i /><i /><i /><i /><i /></span>
-          ) : state === 'thinking' ? (
-            <span className="dots" aria-hidden="true"><i /><i /><i /></span>
-          ) : (
-            <Icon name={micMuted ? 'micOff' : 'mic'} />
-          )}
-        </button>
+        {state === 'speaking' ? (
+          <button className="orb-loader" onClick={orbTap} aria-label={status}>
+            <AiLoader size={180} text={lang === 'en' ? 'Speaking' : 'बोल रही हूँ'} />
+          </button>
+        ) : (
+          <button className={`orb ${state}`} onClick={orbTap} aria-label={status}>
+            {state === 'thinking' ? (
+              <span className="dots" aria-hidden="true"><i /><i /><i /></span>
+            ) : (
+              <Icon name={micMuted ? 'micOff' : 'mic'} />
+            )}
+          </button>
+        )}
         {card && <MiniCard card={card} lang={lang} />}
         {pending && (
           <div className="vo-confirm">

@@ -5,6 +5,7 @@
 import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Icon from '@/components/Icon';
+import AiLoader from '@/components/ui/ai-loader';
 import { askWithRetry, speak, submitTyped, yesNo, stopListening, cancelListening, stopSpeaking, isSpeaking } from '@/lib/voice';
 import { setFarmer, setLang as saveLang } from '@/lib/session';
 import { parsePhone, parseOtp, detectLang, toAcres, extract, parseName, parseLand, parseCrops, placeCandidates } from '@/lib/onboarding';
@@ -199,10 +200,17 @@ export default function Onboarding() {
             }
           }
           if (!g) return { ok: false, reask: T.placeRe };
-          return { ok: true, value: { village: village || g.name, district: g.district || g.name, state: g.state || '', lat: g.lat, lon: g.lon } };
+          const alts = (g.candidates || []).slice(1).filter((c) => c.lat != null);
+          return { ok: true, value: { village: village || g.name, district: g.district || g.name, state: g.state || '', lat: g.lat, lon: g.lon, alts } };
         });
-        if ((await askYN(T.placeOk(place.district, place.state || 'India'))) === 'yes') break;
+        // Same name exists in many states: on "ना", offer the next match before asking again
+        let confirmed = false;
+        for (const opt of [place, ...(place.alts || []).map((c) => ({ village: place.village, district: c.district, state: c.state, lat: c.lat, lon: c.lon }))].slice(0, 3)) {
+          if ((await askYN(T.placeOk(opt.district, opt.state || 'India'))) === 'yes') { place = opt; confirmed = true; break; }
+        }
+        if (confirmed) break;
       }
+      delete place.alts;
       prefetchWeather(place.lat, place.lon, lang); // ready before home opens
 
       // 5. Land
@@ -313,9 +321,13 @@ export default function Onboarding() {
         <button className="vo-close" onClick={() => { cancelListening(); stopSpeaking(); location.reload(); }} aria-label="Restart"><Icon name="x" /></button>
       </div>
       <div className="vo-mid">
-        <button className={`orb ${listening ? 'listening' : 'speaking'}`} onClick={orbTap} aria-label="Tap when done">
-          <Icon name={listening ? 'mic' : 'spk'} />
-        </button>
+        {listening ? (
+          <button className="orb listening" onClick={orbTap} aria-label="Tap when done"><Icon name="mic" /></button>
+        ) : (
+          <button className="orb-loader" onClick={orbTap} aria-label="Skip">
+            <AiLoader size={176} text={langRef.current === 'en' ? 'Speaking' : 'बोल रही हूँ'} />
+          </button>
+        )}
         <p className="vo-status">{listening ? (langRef.current === 'en' ? 'Listening… speak now (tap when done)' : 'सुन रही हूँ… बोलिए (पूरा होने पर दबाएँ)') : ''}</p>
         {problem && (
           <div className="vo-card" role="alert">
